@@ -1,0 +1,25 @@
+{
+  "name": "yt",
+  "version": "1.0.0",
+  "description": "AI-powered video editing system that automatically creates new videos by intelligently mixing scenes from multiple source videos based on script context and face recognition.",
+  "main": "index.js",
+  "scripts": {
+    "frontend": "cd frontend && npm run dev",
+    "backend": "cd backend && uvicorn main:app --reload --port 8000",
+    "dev": "concurrently \"npm run backend\" \"npm run frontend\""
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/NachoMiguel/VideoS.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/NachoMiguel/VideoS/issues"
+  },
+  "homepage": "https://github.com/NachoMiguel/VideoS#readme",
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
