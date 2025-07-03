@@ -34,11 +34,20 @@ wheels/
 **/.env.test.local
 **/.env.production.local
 
-# Virtual Environment
+# Virtual Environment (Updated to catch all variations)
 venv/
+venv*/
 ENV/
+env/
+env*/
+.venv/
+.venv*/
 env.bak/
 venv.bak/
+backend/venv/
+backend/venv*/
+backend/env/
+backend/env*/
 
 # IDE
 .idea/
@@ -80,3 +89,6 @@ backend/cache/
 backend/test_data/
 frontend/.next/
 frontend/out/
+
+# InsightFace models and cache (if you don't want to commit downloaded models)
+**/.insightface/

@@ -27,13 +27,35 @@ class Settings(BaseSettings):
     min_scene_duration: float = 2.0  # seconds
     max_video_duration_seconds: int = 1800  # 30 minutes
     
-    # Face Detection Settings
+    # InsightFace Settings
+    insightface_model_name: str = "buffalo_l"  # Model to use (buffalo_l, buffalo_m, buffalo_s)
+    insightface_providers: List[str] = ["CUDAExecutionProvider", "CPUExecutionProvider"]  # ONNX providers
+    insightface_det_size: tuple = (640, 640)  # Detection input size
+    insightface_det_thresh: float = 0.5  # Detection threshold
+    insightface_rec_thresh: float = 0.6  # Recognition threshold
+    insightface_face_align: bool = True  # Enable face alignment
+    insightface_gpu_memory_fraction: float = 0.5  # GPU memory fraction to use
+    
+    # Face Detection Settings (Legacy - keeping for backward compatibility)
     min_face_confidence: float = 0.5  # Minimum confidence for face detection
     parallel_face_detection: bool = True  # Enable parallel processing
     face_detection_batch_size: int = 10  # Number of frames to process in parallel
     enable_caching: bool = True  # Enable caching of face detection results
     cache_ttl_hours: int = 24  # Cache time-to-live in hours
     max_workers: int = 4  # Maximum number of parallel workers
+    
+    # Face Recognition Settings
+    face_embedding_size: int = 512  # Size of face embeddings
+    face_similarity_threshold: float = 0.6  # Threshold for face matching
+    max_faces_per_frame: int = 10  # Maximum faces to detect per frame
+    face_quality_threshold: float = 0.3  # Minimum face quality score
+    enable_face_quality_filter: bool = True  # Filter low quality faces
+    
+    # Character Training Settings
+    min_character_images: int = 3  # Minimum images needed to train character
+    max_character_images: int = 20  # Maximum images to use per character
+    character_embedding_cache_size: int = 1000  # Max character embeddings to cache
+    character_training_batch_size: int = 5  # Batch size for character training
     
     # Test Mode
     test_mode_enabled: bool = False
@@ -98,6 +120,11 @@ class Settings(BaseSettings):
             self.parallel_processing and 
             self.max_workers > 1
         )
+    
+    @property
+    def insightface_gpu_enabled(self) -> bool:
+        """Check if GPU is available and enabled for InsightFace."""
+        return "CUDAExecutionProvider" in self.insightface_providers
 
 # Global settings instance
 settings = Settings() 

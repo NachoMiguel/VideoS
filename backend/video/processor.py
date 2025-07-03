@@ -129,8 +129,8 @@ class VideoProcessor:
                         }
                         scene_id += 1
                     
-                    # Advanced face detection using the FaceDetector
-                    faces = self._detect_faces_advanced_sync(frame, frame_count / fps)
+                    # Advanced face detection using InsightFace
+                    faces = self._detect_faces_insightface_sync(frame, frame_count / fps)
                     if faces:
                         current_scene["faces"].extend(faces)
                         faces_detected.append({
@@ -183,44 +183,77 @@ class VideoProcessor:
             logger.error(f"Error processing video {video_path}: {str(e)}")
             raise VideoProcessingError(f"Processing failed: {str(e)}")
 
-    def _detect_faces_advanced_sync(self, frame: np.ndarray, timestamp: float) -> List[Dict[str, Any]]:
-        """Synchronous wrapper for advanced face detection."""
+    def _detect_faces_insightface_sync(self, frame: np.ndarray, timestamp: float) -> List[Dict[str, Any]]:
+        """Synchronous wrapper for InsightFace detection."""
         try:
-            # Use the face detector's synchronous method if available
-            if hasattr(self.face_detector, '_detect_faces_in_frame'):
-                faces = self.face_detector._detect_faces_in_frame(frame)
-                # Add timestamp and enhance face data
-                enhanced_faces = []
-                for i, face in enumerate(faces):
-                    enhanced_face = {
-                        "id": f"face_{timestamp}_{i}",
-                        "timestamp": timestamp,
-                        **face
-                    }
-                    enhanced_faces.append(enhanced_face)
-                return enhanced_faces
-            else:
-                # Fallback to basic detection
-                return self._detect_faces_basic(frame)
+            # Use InsightFace for detection
+            faces = self.face_detector._detect_faces_insightface(frame)
+            
+            # Add timestamp and enhance face data
+            enhanced_faces = []
+            for i, face in enumerate(faces):
+                enhanced_face = {
+                    "id": f"face_{timestamp}_{i}",
+                    "timestamp": timestamp,
+                    "bbox": face["bbox"],
+                    "confidence": face["confidence"],
+                    "embedding": face["embedding"].tolist(),  # Convert numpy array to list for JSON serialization
+                    "quality_score": face["quality_score"],
+                    "character": None  # Will be filled by character identification
+                }
+                
+                # Try to identify character if we have trained embeddings
+                if self.face_detector.known_faces:
+                    character_result = self.face_detector.identify_character(face["embedding"])
+                    if character_result:
+                        enhanced_face["character"] = character_result[0]
+                        enhanced_face["character_confidence"] = character_result[1]
+                
+                enhanced_faces.append(enhanced_face)
+            
+            return enhanced_faces
+            
         except Exception as e:
-            logger.error(f"Advanced face detection error: {str(e)}")
+            logger.error(f"InsightFace detection error: {str(e)}")
             # Fallback to basic detection
-            return self._detect_faces_basic(frame)
+            return self._detect_faces_basic(frame, timestamp)
 
     async def _detect_faces_advanced(self, frame: np.ndarray, timestamp: float) -> List[Dict[str, Any]]:
         """Use advanced face detection with character recognition."""
         try:
-            # Use the advanced face detector
+            # Use the InsightFace detector
             result = await self.face_detector._analyze_frame(frame, timestamp)
             if result and result.get('faces'):
-                return result['faces']
+                # Enhance faces with character identification
+                enhanced_faces = []
+                for i, face in enumerate(result['faces']):
+                    enhanced_face = {
+                        "id": f"face_{timestamp}_{i}",
+                        "timestamp": timestamp,
+                        "bbox": face["bbox"],
+                        "confidence": face["confidence"],
+                        "embedding": face["embedding"].tolist(),
+                        "quality_score": face["quality_score"],
+                        "character": None
+                    }
+                    
+                    # Try to identify character
+                    if self.face_detector.known_faces:
+                        character_result = self.face_detector.identify_character(face["embedding"])
+                        if character_result:
+                            enhanced_face["character"] = character_result[0]
+                            enhanced_face["character_confidence"] = character_result[1]
+                    
+                    enhanced_faces.append(enhanced_face)
+                
+                return enhanced_faces
             return []
         except Exception as e:
             logger.error(f"Advanced face detection error: {str(e)}")
             # Fallback to basic detection
-            return self._detect_faces_basic(frame)
+            return self._detect_faces_basic(frame, timestamp)
     
-    def _detect_faces_basic(self, frame: np.ndarray) -> List[Dict[str, Any]]:
+    def _detect_faces_basic(self, frame: np.ndarray, timestamp: float = 0.0) -> List[Dict[str, Any]]:
         """Fallback basic face detection using Haar Cascade."""
         try:
             if not hasattr(self, 'face_cascade'):
@@ -238,12 +271,12 @@ class VideoProcessor:
             
             return [
                 {
-                    "id": f"face_{i}",
-                    "x": int(x),
-                    "y": int(y),
-                    "width": int(w),
-                    "height": int(h),
+                    "id": f"face_{timestamp}_{i}",
+                    "timestamp": timestamp,
+                    "bbox": (int(x), int(y), int(w), int(h)),
                     "confidence": 0.8,  # Default confidence for Haar Cascade
+                    "embedding": None,  # No embedding available
+                    "quality_score": 0.5,  # Default quality score
                     "character": None
                 }
                 for i, (x, y, w, h) in enumerate(faces)

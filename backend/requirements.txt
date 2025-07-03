@@ -1,4 +1,4 @@
-# Core Dependencies
+# Core FastAPI & Security
 fastapi==0.104.1
 uvicorn==0.24.0
 python-multipart==0.0.6
@@ -6,14 +6,23 @@ websockets==12.0
 pydantic==2.4.2
 pydantic-settings==2.0.3
 python-dotenv==1.0.0
+python-jose==3.3.0
+passlib==1.7.4
+bcrypt==4.0.1
 
-# Video Processing
+# AI, Video & Image Processing
+insightface==0.7.3
+onnxruntime-gpu==1.16.3
+numpy==1.24.3
 moviepy==1.0.3
 opencv-python==4.8.1.78
-numpy==1.26.1
 Pillow==10.1.0
+scikit-learn==1.3.2
+scipy==1.11.3
+imageio==2.37.0
+imageio-ffmpeg==0.6.0
 
-# AI Services
+# AI Services & APIs
 openai==1.2.3
 elevenlabs==0.2.27
 httpx==0.25.1
@@ -28,28 +37,14 @@ google-api-python-client==2.108.0
 google-auth-httplib2==0.1.1
 google-auth==2.23.4
 
-# Utilities
+# Utilities & Logging
 python-json-logger==2.0.7
 python-slugify==8.0.1
 tqdm==4.66.1
+loguru==0.7.2
+tenacity==8.2.3
 asyncio==3.4.3
-
-# Configuration and validation
-python-json-logger==2.0.7
-python-slugify==8.0.1
-tqdm==4.67.1
 
 # Development and testing
 pytest==7.4.3
 pytest-asyncio==0.21.1
-
-# New dependencies
-python-jose==3.3.0
-passlib==1.7.4
-bcrypt==4.0.1
-scikit-learn==1.3.2
-scipy==1.11.3
-loguru==0.7.2
-tenacity==8.2.3
-imageio==2.37.0
-imageio-ffmpeg==0.6.0 
