@@ -11,31 +11,13 @@ from ..core.session import SessionManager
 import os
 from core.credit_manager import credit_manager, ServiceType
 from core.parallel_error_handler import parallel_error_handler, OperationType, OperationResult
-
-class FaceDetector:
-    def __init__(self):
-        self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-        self.face_recognition = None  # Initialize face recognition when needed
-        
-    def detect_faces(self, frame: np.ndarray) -> List[Tuple[int, int, int, int]]:
-        """Detect faces in a frame and return their bounding boxes."""
-        try:
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            faces = self.face_cascade.detectMultiScale(
-                gray,
-                scaleFactor=1.1,
-                minNeighbors=5,
-                minSize=(30, 30)
-            )
-            return faces.tolist()
-        except Exception as e:
-            raise FaceDetectionError(f"Failed to detect faces: {str(e)}")
+from video.face_detection import detector as main_face_detector
 
 class VideoProcessor:
     def __init__(self, config: VideoProcessingConfig, session_manager: SessionManager):
         self.config = config
         self.session_manager = session_manager
-        self.face_detector = FaceDetector()
+        self.face_detector = main_face_detector  # Use the main InsightFace detector
         self.parallel_processor = ParallelProcessor(max_workers=config.max_workers)
         self.logger = logging.getLogger(__name__)
 

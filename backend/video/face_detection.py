@@ -11,6 +11,9 @@ import os
 import json
 import insightface
 
+# Persistence imports
+from .character_persistence import character_persistence
+
 # Handle both relative and absolute imports
 try:
     from ..core.config import settings
@@ -51,6 +54,11 @@ except ImportError:
             min_character_images = 3
             max_character_images = 20
             face_similarity_threshold = 0.6
+            # Performance optimization settings
+            character_confidence_threshold = 0.75  # Only process high-confidence character matches
+            skip_frames_with_no_faces = True
+            batch_character_identification = True
+            frame_skip_interval = 2  # Process every 2nd frame for faster processing
         
         settings = Settings()
         
@@ -96,6 +104,9 @@ class FaceDetector:
         self.character_images = {}  # character_name -> image_paths
         
         self.executor = ThreadPoolExecutor(max_workers=settings.max_workers)
+        
+        # Load cached character training data on startup
+        self._load_cached_characters()
         
         logger.info(f"Face detector initialized: parallel={self.parallel_enabled}, caching={self.enable_caching}")
 
@@ -259,25 +270,67 @@ class FaceDetector:
         frame: np.ndarray,
         timestamp: float
     ) -> Optional[Dict[str, Any]]:
-        """Analyze a single frame for faces."""
+        """Analyze a single frame for faces and identify characters with performance optimizations."""
         try:
             # Use InsightFace for detection and recognition
             faces = self._detect_faces_insightface(frame)
             
             if not faces:
-                return None
+                # Skip frames with no faces for performance if enabled
+                if settings.skip_frames_with_no_faces:
+                    return None
+                else:
+                    return {
+                        'timestamp': timestamp,
+                        'faces': [],
+                        'character_count': 0,
+                        'total_faces': 0
+                    }
             
             # Filter faces by quality if enabled
             if settings.enable_face_quality_filter:
                 faces = [f for f in faces if f['quality_score'] >= settings.face_quality_threshold]
             
-            # Limit number of faces per frame
+            # Limit number of faces per frame early to avoid processing too many
             if len(faces) > settings.max_faces_per_frame:
                 faces = sorted(faces, key=lambda x: x['confidence'], reverse=True)[:settings.max_faces_per_frame]
             
+            # Batch character identification for performance
+            if settings.batch_character_identification and hasattr(self, 'known_faces') and self.known_faces:
+                identified_character_count = await self._batch_identify_characters(faces, timestamp)
+            else:
+                # Individual character identification
+                identified_character_count = 0
+                for face in faces:
+                    if hasattr(self, 'known_faces') and self.known_faces:
+                        try:
+                            character_result = self.identify_character(face['embedding'])
+                            if character_result and character_result[1] >= settings.character_confidence_threshold:
+                                face['character'] = character_result[0]
+                                face['character_confidence'] = character_result[1]
+                                face['character_identified'] = True
+                                identified_character_count += 1
+                                logger.debug(f"Identified {character_result[0]} with confidence {character_result[1]:.3f} at {timestamp}s")
+                            else:
+                                face['character'] = None
+                                face['character_confidence'] = character_result[1] if character_result else 0.0
+                                face['character_identified'] = False
+                        except Exception as e:
+                            logger.warning(f"Character identification failed for face at {timestamp}s: {str(e)}")
+                            face['character'] = None
+                            face['character_confidence'] = 0.0
+                            face['character_identified'] = False
+                    else:
+                        # No trained characters available
+                        face['character'] = None
+                        face['character_confidence'] = 0.0
+                        face['character_identified'] = False
+            
             return {
                 'timestamp': timestamp,
-                'faces': faces
+                'faces': faces,
+                'character_count': identified_character_count,
+                'total_faces': len(faces)
             }
             
         except Exception as e:
@@ -334,12 +387,25 @@ class FaceDetector:
         character_images: Dict[str, List[str]],
         progress_callback: Optional[callable] = None
     ) -> Dict[str, List[np.ndarray]]:
-        """Train face embeddings for known characters."""
+        """Train face embeddings for known characters with persistence layer."""
         trained_faces = {}
         total_characters = len(character_images)
         
         for i, (character_name, image_paths) in enumerate(character_images.items()):
             try:
+                # Check if character is already cached
+                cached_embeddings = character_persistence.load_character_training(character_name)
+                if cached_embeddings:
+                    trained_faces[character_name] = cached_embeddings
+                    self.known_faces[character_name] = cached_embeddings
+                    logger.info(f"Loaded cached training for {character_name}: {len(cached_embeddings)} embeddings")
+                    
+                    if progress_callback:
+                        progress = ((i + 1) / total_characters) * 100
+                        await progress_callback(f"Loaded cached {character_name}", progress)
+                    continue
+                
+                # Train new character
                 embeddings = []
                 valid_images = 0
                 
@@ -362,7 +428,16 @@ class FaceDetector:
                 if len(embeddings) >= settings.min_character_images:
                     trained_faces[character_name] = embeddings
                     self.known_faces[character_name] = embeddings
-                    logger.info(f"Trained {character_name} with {len(embeddings)} face embeddings")
+                    
+                    # Save to persistence layer
+                    metadata = {
+                        'image_count': len(image_paths),
+                        'valid_images': valid_images,
+                        'training_date': time.time()
+                    }
+                    character_persistence.save_character_training(character_name, embeddings, metadata)
+                    
+                    logger.info(f"Trained and cached {character_name} with {len(embeddings)} face embeddings")
                 else:
                     logger.warning(f"Insufficient quality images for {character_name}: {len(embeddings)}/{settings.min_character_images}")
                 
@@ -391,6 +466,168 @@ class FaceDetector:
             return best_match, best_similarity
         
         return None
+
+    async def get_face_embedding(self, face: Dict) -> np.ndarray:
+        """Extract embedding from face data."""
+        if 'embedding' in face:
+            return face['embedding']
+        
+        # If no embedding in face data, try to extract from bbox if frame is available
+        if 'bbox' in face and 'frame' in face:
+            x, y, w, h = face['bbox']
+            frame = face['frame']
+            face_region = frame[y:y+h, x:x+w]
+            
+            # Re-detect face to get embedding
+            faces = self._detect_faces_insightface(face_region)
+            if faces:
+                return faces[0]['embedding']
+        
+        raise ValueError("Cannot extract embedding from face data - no embedding or frame information available")
+
+    async def compare_embeddings(self, emb1: np.ndarray, emb2: np.ndarray) -> float:
+        """Compare two embeddings using cosine similarity."""
+        return self.compare_faces(emb1, emb2)
+
+    async def train_face_recognition_async(self, characters: List[str]) -> bool:
+        """Async wrapper for training with character image lookup."""
+        try:
+            # Get character images from image search service
+            from services.image_search import image_search_service
+            character_images = await image_search_service.search_character_images(characters)
+            
+            if not character_images:
+                logger.warning("No character images found for training")
+                return False
+            
+            # Train face recognition
+            trained_faces = await self.train_character_faces(character_images)
+            
+            success = len(trained_faces) > 0
+            if success:
+                logger.info(f"Successfully trained {len(trained_faces)} characters: {list(trained_faces.keys())}")
+            else:
+                logger.warning("Face training completed but no characters were successfully trained")
+            
+            return success
+            
+        except Exception as e:
+            logger.error(f"Async training failed: {str(e)}")
+            return False
+
+    def get_trained_characters(self) -> List[str]:
+        """Get list of currently trained characters."""
+        return list(self.known_faces.keys())
+
+    def clear_character_training(self):
+        """Clear all trained character data including persistence layer."""
+        self.known_faces.clear()
+        character_persistence.clear_all_cache()
+        logger.info("Cleared all character training data and cache")
+
+    def get_character_training_status(self) -> Dict[str, Dict[str, Any]]:
+        """Get status of character training."""
+        status = {}
+        for character_name, embeddings in self.known_faces.items():
+            status[character_name] = {
+                'trained': True,
+                'embedding_count': len(embeddings),
+                'avg_quality': sum(1.0 for _ in embeddings) / len(embeddings)  # Simplified quality metric
+            }
+        return status
+    
+    def _load_cached_characters(self):
+        """Load all cached character training data on startup."""
+        try:
+            cached_characters = character_persistence.get_cached_characters()
+            loaded_count = 0
+            
+            for character_name in cached_characters:
+                embeddings = character_persistence.load_character_training(character_name)
+                if embeddings:
+                    self.known_faces[character_name] = embeddings
+                    loaded_count += 1
+            
+            if loaded_count > 0:
+                logger.info(f"Loaded {loaded_count} cached characters on startup")
+            else:
+                logger.info("No cached characters found on startup")
+                
+        except Exception as e:
+            logger.error(f"Error loading cached characters: {str(e)}")
+    
+    def get_cache_statistics(self) -> Dict[str, Any]:
+        """Get cache statistics including persistence layer."""
+        try:
+            persistence_stats = character_persistence.get_cache_stats()
+            runtime_stats = {
+                'runtime_characters': len(self.known_faces),
+                'runtime_embeddings': sum(len(embeddings) for embeddings in self.known_faces.values())
+            }
+            
+            return {
+                'persistence': persistence_stats,
+                'runtime': runtime_stats
+            }
+        except Exception as e:
+            logger.error(f"Error getting cache statistics: {str(e)}")
+            return {}
+    
+    async def _batch_identify_characters(self, faces: List[Dict], timestamp: float) -> int:
+        """Batch identify characters for performance optimization."""
+        try:
+            identified_count = 0
+            
+            # Extract all embeddings at once
+            embeddings = []
+            for face in faces:
+                if 'embedding' in face:
+                    embeddings.append(face['embedding'])
+                else:
+                    embeddings.append(None)
+            
+            # Batch compare against all known characters
+            for i, (face, embedding) in enumerate(zip(faces, embeddings)):
+                if embedding is None:
+                    face['character'] = None
+                    face['character_confidence'] = 0.0
+                    face['character_identified'] = False
+                    continue
+                
+                # Find best match among all known characters
+                best_match = None
+                best_confidence = 0.0
+                
+                for character_name, character_embeddings in self.known_faces.items():
+                    # Use average similarity across all embeddings for this character
+                    similarities = []
+                    for char_embedding in character_embeddings:
+                        similarity = self.compare_faces(embedding, char_embedding)
+                        similarities.append(similarity)
+                    
+                    # Use best similarity from this character
+                    avg_similarity = max(similarities) if similarities else 0.0
+                    
+                    if avg_similarity > best_confidence:
+                        best_confidence = avg_similarity
+                        best_match = character_name
+                
+                # Apply confidence threshold
+                if best_match and best_confidence >= settings.character_confidence_threshold:
+                    face['character'] = best_match
+                    face['character_confidence'] = best_confidence
+                    face['character_identified'] = True
+                    identified_count += 1
+                else:
+                    face['character'] = None
+                    face['character_confidence'] = best_confidence
+                    face['character_identified'] = False
+            
+            return identified_count
+            
+        except Exception as e:
+            logger.error(f"Batch character identification error at {timestamp}s: {str(e)}")
+            return 0
 
     def _get_cache_path(self, video_path: str, start_time: float, duration: float) -> Path:
         """Generate cache file path for video segment."""

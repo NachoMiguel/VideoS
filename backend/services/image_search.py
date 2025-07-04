@@ -17,6 +17,10 @@ class ImageSearchService:
         self.image_cache_dir = Path(settings.cache_dir) / "character_images"
         self.image_cache_dir.mkdir(parents=True, exist_ok=True)
         
+        # API configuration
+        self.google_api_key = settings.google_custom_search_api_key
+        self.google_engine_id = settings.google_custom_search_engine_id
+        
     async def search_character_images(self, characters: List[str]) -> Dict[str, List[str]]:
         """Search for character images and download them."""
         try:
@@ -28,13 +32,26 @@ class ImageSearchService:
             for character in characters:
                 try:
                     logger.info(f"Searching images for character: {character}")
-                    image_urls = await self._search_images_for_character(character)
                     
+                    # Try Google Custom Search first
+                    image_urls = await self._search_google_images(character)
+                    
+                    # If not enough images, try local database
+                    if len(image_urls) < 3:
+                        local_images = await self._search_local_images(character)
+                        image_urls.extend(local_images)
+                    
+                    # Validate and filter images
                     if image_urls:
-                        # Download and cache images
-                        cached_paths = await self._download_and_cache_images(character, image_urls)
-                        character_images[character] = cached_paths
-                        logger.info(f"Found {len(cached_paths)} images for {character}")
+                        validated_urls = await self._validate_image_urls(image_urls)
+                        if validated_urls:
+                            # Download and cache images
+                            cached_paths = await self._download_and_cache_images(character, validated_urls)
+                            character_images[character] = cached_paths
+                            logger.info(f"Found {len(cached_paths)} images for {character}")
+                        else:
+                            logger.warning(f"No valid images found for character: {character}")
+                            character_images[character] = []
                     else:
                         logger.warning(f"No images found for character: {character}")
                         character_images[character] = []
@@ -55,80 +72,128 @@ class ImageSearchService:
             if self.session:
                 await self.session.close()
                 self.session = None
-    
-    async def _search_images_for_character(self, character_name: str) -> List[str]:
-        """Search for images of a specific character."""
+
+    async def _search_google_images(self, character_name: str) -> List[str]:
+        """Search for images using Google Custom Search API."""
         try:
-            # Use a combination of search methods
-            image_urls = []
+            if not self.google_api_key or not self.google_engine_id:
+                logger.warning("Google Custom Search API not configured")
+                return []
             
-            # Method 1: Use known character database (if available)
-            known_images = await self._get_known_character_images(character_name)
-            if known_images:
-                image_urls.extend(known_images)
+            # Prepare search query
+            query = f"{character_name} actor headshot portrait"
+            url = "https://www.googleapis.com/customsearch/v1"
             
-            # Method 2: Generate placeholder/stock images if no real images found
-            if not image_urls:
-                placeholder_images = await self._generate_placeholder_images(character_name)
-                image_urls.extend(placeholder_images)
+            params = {
+                'key': self.google_api_key,
+                'cx': self.google_engine_id,
+                'q': query,
+                'searchType': 'image',
+                'num': 10,
+                'imgType': 'face',
+                'imgSize': 'medium',
+                'safe': 'active'
+            }
             
-            return image_urls[:5]  # Limit to 5 images per character
+            if self.session:
+                async with self.session.get(url, params=params) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        
+                        image_urls = []
+                        for item in data.get('items', []):
+                            img_url = item.get('link')
+                            if img_url and self._is_valid_image_url(img_url):
+                                image_urls.append(img_url)
+                        
+                        logger.info(f"Google Search found {len(image_urls)} images for {character_name}")
+                        return image_urls[:5]  # Limit to 5 images
+                    else:
+                        logger.error(f"Google API error: {response.status} - {await response.text()}")
+                        return []
+            
+            return []
             
         except Exception as e:
-            logger.error(f"Error searching images for {character_name}: {str(e)}")
+            logger.error(f"Google image search error for {character_name}: {str(e)}")
             return []
-    
-    async def _get_known_character_images(self, character_name: str) -> List[str]:
-        """Get images for known characters from predefined sources."""
+
+    async def _search_local_images(self, character_name: str) -> List[str]:
+        """Search local image database for known characters."""
         try:
-            # Known character mappings (for demo purposes)
-            known_characters = {
-                "Jean Claude Vandamme": [
-                    "https://via.placeholder.com/300x400/0066cc/ffffff?text=JCVD",
-                    "https://via.placeholder.com/300x400/cc6600/ffffff?text=Van+Damme"
+            # Local database for known characters (can be expanded)
+            local_database = {
+                "jean claude van damme": [
+                    "https://m.media-amazon.com/images/M/MV5BMjI4NDI1MjY5OF5BMl5BanBnXkFtZTcwNTgzNzY3MQ@@._V1_.jpg",
+                    "https://m.media-amazon.com/images/M/MV5BMTQ2NzgxMTAxNV5BMl5BanBnXkFtZTcwMzg1NjIyMQ@@._V1_.jpg"
                 ],
-                "Steven Seagal": [
-                    "https://via.placeholder.com/300x400/006600/ffffff?text=Seagal",
-                    "https://via.placeholder.com/300x400/660066/ffffff?text=Steven+S"
+                "steven seagal": [
+                    "https://m.media-amazon.com/images/M/MV5BMTk4MDI2NDEzNl5BMl5BanBnXkFtZTcwMTI3NjcyMQ@@._V1_.jpg",
+                    "https://m.media-amazon.com/images/M/MV5BMTgzNjA1MjY1NV5BMl5BanBnXkFtZTcwMjU3NDEyMQ@@._V1_.jpg"
                 ]
             }
             
-            # Check for exact match or partial match
-            for known_char, urls in known_characters.items():
-                if character_name.lower() in known_char.lower() or known_char.lower() in character_name.lower():
+            # Normalize character name for lookup
+            normalized_name = character_name.lower().strip()
+            
+            # Try exact match first
+            if normalized_name in local_database:
+                return local_database[normalized_name]
+            
+            # Try partial match
+            for known_char, urls in local_database.items():
+                if known_char in normalized_name or normalized_name in known_char:
+                    logger.info(f"Found partial match for {character_name}: {known_char}")
                     return urls
             
             return []
             
         except Exception as e:
-            logger.error(f"Error getting known character images: {str(e)}")
+            logger.error(f"Error searching local images for {character_name}: {str(e)}")
             return []
-    
-    async def _generate_placeholder_images(self, character_name: str) -> List[str]:
-        """Generate placeholder images for unknown characters."""
+
+    def _is_valid_image_url(self, url: str) -> bool:
+        """Check if URL is a valid image URL."""
         try:
-            # Create placeholder URLs with character names
-            placeholders = []
-            name_parts = character_name.split()
+            parsed = urlparse(url)
+            if not parsed.netloc:
+                return False
             
-            # Generate different placeholder styles
-            colors = ["0066cc", "cc6600", "006600", "660066", "cc0066"]
+            # Check file extension
+            valid_extensions = ['.jpg', '.jpeg', '.png', '.webp', '.bmp']
+            path_lower = parsed.path.lower()
             
-            for i, color in enumerate(colors[:3]):  # Max 3 placeholders
-                if len(name_parts) >= 2:
-                    initials = f"{name_parts[0][0]}{name_parts[1][0]}"
-                else:
-                    initials = character_name[:2].upper()
-                
-                url = f"https://via.placeholder.com/300x400/{color}/ffffff?text={initials}"
-                placeholders.append(url)
+            # Check if URL ends with valid extension or has image indicators
+            has_extension = any(path_lower.endswith(ext) for ext in valid_extensions)
+            has_image_indicator = 'image' in url.lower() or 'photo' in url.lower()
             
-            return placeholders
+            return has_extension or has_image_indicator
             
-        except Exception as e:
-            logger.error(f"Error generating placeholder images: {str(e)}")
-            return []
-    
+        except Exception:
+            return False
+
+    async def _validate_image_urls(self, urls: List[str]) -> List[str]:
+        """Validate that URLs return actual images."""
+        validated = []
+        
+        for url in urls[:10]:  # Limit validation to prevent excessive requests
+            try:
+                if self.session:
+                    async with self.session.head(url, timeout=5) as response:
+                        if response.status == 200:
+                            content_type = response.headers.get('content-type', '').lower()
+                            if content_type.startswith('image/'):
+                                validated.append(url)
+                            else:
+                                logger.debug(f"URL {url} is not an image (content-type: {content_type})")
+                        else:
+                            logger.debug(f"URL {url} returned status {response.status}")
+            except Exception as e:
+                logger.debug(f"Failed to validate URL {url}: {str(e)}")
+                continue
+        
+        return validated
+
     async def _download_and_cache_images(self, character_name: str, image_urls: List[str]) -> List[str]:
         """Download images and cache them locally."""
         try:

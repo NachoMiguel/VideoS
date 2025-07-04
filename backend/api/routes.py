@@ -347,12 +347,12 @@ async def start_processing(session_id: str = Form(...)):
         logger.error(f"Processing start error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-async def analyze_video_scenes(videos: List[str], characters: List[Dict]) -> List[Dict]:
-    """Analyze video scenes for content and quality."""
+async def analyze_video_scenes(videos: List[str], characters: List[Dict] = None) -> List[Dict]:
+    """Analyze video scenes for content and quality with character identification."""
     try:
         results = []
         for video_path in videos:
-            # Process video for scenes
+            # Process video for scenes with character identification
             scenes = await processor.process_videos_parallel([video_path])
             
             # Analyze each scene
@@ -370,10 +370,24 @@ async def analyze_video_scenes(videos: List[str], characters: List[Dict]) -> Lis
                 
                 # Add character recognition data
                 if scene.get('faces'):
-                    scene['characters'] = await _identify_characters(
-                        scene['faces'],
-                        characters
-                    )
+                    scene['characters'] = await _identify_characters(scene['faces'])
+                    
+                    # Add character summary for easy access
+                    scene['character_summary'] = {
+                        'total_characters': len(scene['characters']),
+                        'identified_characters': len([c for c in scene['characters'] if c['character_id'] != 'unknown']),
+                        'character_names': list(set([c['name'] for c in scene['characters'] if c['character_id'] != 'unknown'])),
+                        'avg_confidence': sum([c['confidence'] for c in scene['characters'] if c['character_id'] != 'unknown']) / 
+                                       max(len([c for c in scene['characters'] if c['character_id'] != 'unknown']), 1)
+                    }
+                else:
+                    scene['characters'] = []
+                    scene['character_summary'] = {
+                        'total_characters': 0,
+                        'identified_characters': 0,
+                        'character_names': [],
+                        'avg_confidence': 0.0
+                    }
                 
                 results.append(scene)
         
@@ -420,32 +434,48 @@ async def _calculate_scene_quality(
         logger.error(f"Quality calculation error: {str(e)}")
         return 0.0
 
-async def _identify_characters(faces: List[Dict], known_characters: List[Dict]) -> List[Dict]:
-    """Identify characters in detected faces."""
+async def _identify_characters(faces: List[Dict], known_characters: List[Dict] = None) -> List[Dict]:
+    """Identify characters in detected faces using trained face recognition."""
     try:
         identified_characters = []
         for face in faces:
-            # Calculate face embeddings
-            face_embedding = await face_detector.get_face_embedding(face)
-            
-            # Find best matching character
-            best_match = None
-            best_score = 0.0
-            
-            for character in known_characters:
-                score = await face_detector.compare_embeddings(
-                    face_embedding,
-                    character['embedding']
-                )
-                if score > best_score and score > 0.7:  # Confidence threshold
-                    best_score = score
-                    best_match = character
-            
-            if best_match:
+            # Skip if face already has character identification from frame analysis
+            if face.get('character_identified', False):
                 identified_characters.append({
-                    'character_id': best_match['id'],
-                    'name': best_match['name'],
-                    'confidence': best_score,
+                    'character_id': face.get('character', 'unknown'),
+                    'name': face.get('character', 'unknown'),
+                    'confidence': face.get('character_confidence', 0.0),
+                    'face_data': face
+                })
+                continue
+            
+            # Calculate face embeddings if not present
+            if 'embedding' not in face:
+                try:
+                    face_embedding = await face_detector.get_face_embedding(face)
+                except Exception as e:
+                    logger.warning(f"Could not extract embedding for face: {str(e)}")
+                    continue
+            else:
+                face_embedding = face['embedding']
+            
+            # Use the trained face recognition system
+            character_result = detector.identify_character(face_embedding)
+            
+            if character_result:
+                character_name, confidence = character_result
+                identified_characters.append({
+                    'character_id': character_name,
+                    'name': character_name,
+                    'confidence': confidence,
+                    'face_data': face
+                })
+            else:
+                # No character match found
+                identified_characters.append({
+                    'character_id': 'unknown',
+                    'name': 'unknown',
+                    'confidence': 0.0,
                     'face_data': face
                 })
         
