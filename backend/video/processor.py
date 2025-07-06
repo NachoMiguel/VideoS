@@ -11,12 +11,12 @@ import time
 from core.config import settings
 from core.logger import logger
 from core.exceptions import VideoProcessingError
-from .face_detection import FaceDetector
+from .face_detection import detector
 
 class VideoProcessor:
     def __init__(self):
         self.executor = ThreadPoolExecutor(max_workers=3)
-        self.face_detector = FaceDetector()
+        self.face_detector = detector  # Use global instance
         
     async def process_videos_parallel(
         self,

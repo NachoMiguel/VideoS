@@ -85,9 +85,9 @@ class FaceDetector:
         self.min_confidence = settings.insightface_det_thresh
         self.recognition_threshold = settings.insightface_rec_thresh
         
-        # Initialize InsightFace models
+        # Initialize InsightFace models (lazy loading)
         self.app = None
-        self._initialize_insightface()
+        self._insightface_initialized = False
         
         # Caching
         self.enable_caching = settings.enable_caching
@@ -107,18 +107,23 @@ class FaceDetector:
     def _initialize_insightface(self):
         """Initialize InsightFace models."""
         try:
+            logger.info(f"Initializing InsightFace with model: {settings.insightface_model_name}")
             self.app = insightface.app.FaceAnalysis(
                 name=settings.insightface_model_name,
                 providers=settings.insightface_providers
             )
             self.app.prepare(ctx_id=0, det_size=settings.insightface_det_size)
-            logger.info(f"InsightFace initialized with model: {settings.insightface_model_name}")
+            self._insightface_initialized = True
+            logger.info(f"InsightFace initialization completed successfully")
         except Exception as e:
             logger.error(f"Failed to initialize InsightFace: {str(e)}")
             raise FaceDetectionError(f"InsightFace initialization failed: {str(e)}")
 
     def _detect_faces_insightface(self, frame: np.ndarray) -> List[Dict[str, Any]]:
         """Detect faces using InsightFace."""
+        if not self._insightface_initialized:
+            self._initialize_insightface()
+            
         if self.app is None:
             raise FaceDetectionError("InsightFace not initialized")
             

@@ -8,7 +8,7 @@ import aiohttp
 import httpx
 import time
 from core.config import settings
-from core.exceptions import TTSGenerationError, VoiceNotFoundError, APIError, AudioGenerationError, CreditExhaustionError
+from core.exceptions import VoiceNotFoundError, ElevenLabsError, AudioGenerationError, CreditExhaustionError
 from core.parallel import parallel_processor, parallel_task
 from core.credit_manager import credit_manager, ServiceType
 from core.parallel_error_handler import OperationType
@@ -22,7 +22,7 @@ class ElevenLabsService:
     
     def __init__(self):
         if not settings.elevenlabs_api_keys:
-            raise APIError("ElevenLabs API keys not configured")
+            raise ElevenLabsError("ElevenLabs API keys not configured")
         
         self.api_keys = settings.elevenlabs_api_keys
         self.current_key_index = 0
@@ -442,7 +442,7 @@ class ElevenLabsService:
                     ) as response:
                         if response.status != 200:
                             error_text = await response.text()
-                            raise TTSGenerationError(
+                            raise AudioGenerationError(
                                 f"TTS generation failed: {error_text}"
                             )
                         
@@ -455,7 +455,7 @@ class ElevenLabsService:
 
         except Exception as e:
             logger.error(f"Speech generation error: {str(e)}")
-            raise TTSGenerationError(str(e))
+            raise AudioGenerationError(str(e))
 
     async def _get_voices(self) -> list:
         """Get list of available voices."""

@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass
 
 from .config import settings
-from .exceptions import ProcessingError
+from .exceptions import ParallelProcessingError
 
 logger = logging.getLogger(__name__)
 
@@ -244,7 +244,7 @@ def parallel_task(task_type: str = 'default'):
             elif results and results[0].error:
                 raise results[0].error
             else:
-                raise ProcessingError(f"Parallel task {func.__name__} failed")
+                raise ParallelProcessingError(f"Parallel task {func.__name__} failed")
         
         return wrapper
     return decorator 
