@@ -5,7 +5,7 @@ import { useVideoStore } from '@/stores/videoStore'
 import { useTestModeStore } from '@/stores/testModeStore'
 import { Upload, X, Film, AlertCircle, CheckCircle2, ArrowRight } from 'lucide-react'
 import { useDropzone } from 'react-dropzone'
-import toast from 'react-hot-toast'
+import { useToast } from '@/hooks/use-toast'
 
 interface VideoFile extends File {
   preview: string
@@ -15,6 +15,7 @@ interface VideoFile extends File {
 export default function VideoUpload() {
   const { sessionId, setCurrentStep } = useVideoStore()
   const { testMode } = useTestModeStore()
+  const { toast } = useToast()
   
   const [uploadedFiles, setUploadedFiles] = useState<VideoFile[]>([])
   const [isUploading, setIsUploading] = useState(false)
@@ -35,7 +36,11 @@ export default function VideoUpload() {
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (uploadedFiles.length + acceptedFiles.length > MAX_FILES) {
-      toast.error(`Maximum ${MAX_FILES} videos allowed`)
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: `Maximum ${MAX_FILES} videos allowed`
+      })
       return
     }
 
@@ -48,7 +53,11 @@ export default function VideoUpload() {
           progress: 0
         } as VideoFile
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : 'Invalid file')
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: error instanceof Error ? error.message : 'Invalid file'
+        })
         return null
       }
     }).filter((file): file is VideoFile => file !== null)
@@ -76,12 +85,20 @@ export default function VideoUpload() {
 
   const uploadFiles = async () => {
     if (!sessionId) {
-      toast.error('Session not found')
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: 'Session not found'
+      })
       return
     }
 
     if (uploadedFiles.length === 0) {
-      toast.error('Please upload at least one video')
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: 'Please upload at least one video'
+      })
       return
     }
 
@@ -127,12 +144,19 @@ export default function VideoUpload() {
 
       await Promise.all(uploads)
       
-      toast.success('Videos uploaded successfully!')
+      toast({
+        title: "Success",
+        description: 'Videos uploaded successfully!'
+      })
       setCurrentStep('processing')
       
     } catch (error) {
       console.error('Upload error:', error)
-      toast.error('Failed to upload videos')
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: 'Failed to upload videos'
+      })
     } finally {
       setIsUploading(false)
     }

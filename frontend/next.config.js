@@ -1,5 +1,11 @@
+// Import Sentry configuration
+const { withSentryConfig } = require('@sentry/nextjs')
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  experimental: {
+    instrumentationHook: true,
+  },
   async rewrites() {
     return [
       {
@@ -26,4 +32,25 @@ const nextConfig = {
   },
 }
 
-module.exports = nextConfig 
+// Sentry configuration
+const sentryConfig = {
+  // Disable source maps upload in development
+  silent: process.env.NODE_ENV === 'development',
+  
+  // Upload source maps to Sentry
+  widenClientFileUpload: true,
+  
+  // Enable auto-discovery of performance monitoring
+  transpileClientSDK: true,
+  
+  // Tunnel through Next.js to avoid ad-blockers
+  tunnelRoute: '/monitoring',
+  
+  // Hide source maps from generated client bundles
+  hideSourceMaps: true,
+  
+  // Disable telemetry collection
+  disableLogger: true,
+}
+
+module.exports = withSentryConfig(nextConfig, sentryConfig) 

@@ -4,7 +4,7 @@ import React, { useState } from 'react'
 import { useVideoStore } from '@/stores/videoStore'
 import { useTestModeStore } from '@/stores/testModeStore'
 import { Download, RefreshCw, Share2, CheckCircle2, AlertCircle } from 'lucide-react'
-import toast from 'react-hot-toast'
+import { useToast } from '@/hooks/use-toast'
 
 interface VideoStats {
   duration: string
@@ -21,6 +21,7 @@ interface CompletedPageProps {
 export default function CompletedPage({ onRestart }: CompletedPageProps) {
   const { sessionId, setCurrentStep } = useVideoStore()
   const { testMode } = useTestModeStore()
+  const { toast } = useToast()
   
   const [isDownloading, setIsDownloading] = useState(false)
   const [downloadProgress, setDownloadProgress] = useState(0)
@@ -34,7 +35,11 @@ export default function CompletedPage({ onRestart }: CompletedPageProps) {
 
   const handleDownload = async () => {
     if (!sessionId) {
-      toast.error('Session not found')
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: 'Session not found'
+      })
       return
     }
 
@@ -90,10 +95,17 @@ export default function CompletedPage({ onRestart }: CompletedPageProps) {
       window.URL.revokeObjectURL(url)
       document.body.removeChild(a)
       
-      toast.success('Download completed!')
+      toast({
+        title: "Success",
+        description: 'Download completed!'
+      })
     } catch (error) {
       console.error('Download error:', error)
-      toast.error('Failed to download video')
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: 'Failed to download video'
+      })
     } finally {
       setIsDownloading(false)
       setDownloadProgress(0)
@@ -103,10 +115,17 @@ export default function CompletedPage({ onRestart }: CompletedPageProps) {
   const handleShare = async () => {
     try {
       await navigator.clipboard.writeText(window.location.href)
-      toast.success('Link copied to clipboard!')
+      toast({
+        title: "Success",
+        description: 'Link copied to clipboard!'
+      })
     } catch (error) {
       console.error('Share error:', error)
-      toast.error('Failed to copy link')
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: 'Failed to copy link'
+      })
     }
   }
 

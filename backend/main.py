@@ -13,6 +13,29 @@ from api.video_routes import router as video_router
 from api.websocket import websocket_router
 from core.background_tasks import startup_background_tasks, shutdown_background_tasks
 
+# Initialize Sentry for error tracking
+import sentry_sdk
+from sentry_sdk.integrations.fastapi import FastApiIntegration
+from sentry_sdk.integrations.asyncio import AsyncioIntegration
+
+if settings.sentry_enabled and settings.sentry_dsn:
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn,
+        environment=settings.sentry_environment,
+        release=settings.sentry_release,
+        sample_rate=settings.sentry_sample_rate,
+        traces_sample_rate=settings.sentry_traces_sample_rate,
+        integrations=[
+            FastApiIntegration(
+                transaction_style="endpoint",
+                failed_request_status_codes=[500, 502, 503, 504],
+            ),
+            AsyncioIntegration(),
+        ],
+        before_send=lambda event, hint: event if settings.sentry_enabled else None,
+    )
+    logger.info("Sentry initialized for error tracking")
+
 # Create FastAPI app
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -54,6 +77,26 @@ if os.path.exists(settings.output_dir):
 # Global exception handler
 @app.exception_handler(AIVideoSlicerException)
 async def custom_exception_handler(request, exc: AIVideoSlicerException):
+    # Add request context to Sentry
+    sentry_sdk.set_context("request", {
+        "url": str(request.url),
+        "method": request.method,
+        "headers": dict(request.headers),
+        "client_ip": request.client.host if request.client else None
+    })
+    
+    # Add user context if available (from session or auth)
+    session_id = request.headers.get("X-Session-ID")
+    if session_id:
+        sentry_sdk.set_user({"id": session_id})
+    
+    # Add custom tags
+    sentry_sdk.set_tag("error_type", "application_error")
+    sentry_sdk.set_tag("error_code", exc.error_code)
+    
+    # Capture the exception (already done in AIVideoSlicerException but adding context)
+    sentry_sdk.capture_exception(exc)
+    
     logger.error(f"Application error: {exc.message}")
     
     return JSONResponse(
@@ -68,6 +111,26 @@ async def custom_exception_handler(request, exc: AIVideoSlicerException):
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request, exc: Exception):
+    # Add comprehensive request context to Sentry
+    sentry_sdk.set_context("request", {
+        "url": str(request.url),
+        "method": request.method,
+        "headers": dict(request.headers),
+        "client_ip": request.client.host if request.client else None
+    })
+    
+    # Add user context if available
+    session_id = request.headers.get("X-Session-ID")
+    if session_id:
+        sentry_sdk.set_user({"id": session_id})
+    
+    # Add tags for unhandled exceptions
+    sentry_sdk.set_tag("error_type", "unhandled_exception")
+    sentry_sdk.set_tag("exception_name", type(exc).__name__)
+    
+    # Capture unhandled exceptions
+    sentry_sdk.capture_exception(exc)
+    
     logger.error(f"Unexpected error: {str(exc)}")
     
     return JSONResponse(

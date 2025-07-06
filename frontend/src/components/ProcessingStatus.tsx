@@ -17,7 +17,7 @@ import {
   FileText,
   Wand2
 } from 'lucide-react'
-import toast from 'react-hot-toast'
+import { useToast } from '@/hooks/use-toast'
 
 interface ProcessingStatusProps {
   onComplete: () => void

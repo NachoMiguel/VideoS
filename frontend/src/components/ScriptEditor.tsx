@@ -3,7 +3,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react'
 import { useVideoStore } from '@/stores/videoStore'
 import { Edit3, Scissors, Plus, Zap, Trash2, ArrowRight, Undo, Redo, Save, Eye, EyeOff } from 'lucide-react'
-import toast from 'react-hot-toast'
+import { useToast } from '@/hooks/use-toast'
 
 // Script modification actions with keyboard shortcuts
 const ModificationActions = [
@@ -47,6 +47,8 @@ export default function ScriptEditor({ onNext }: ScriptEditorProps) {
     setScript, 
     setCurrentStep 
   } = useVideoStore()
+  
+  const { toast } = useToast()
   
   const [textSelection, setTextSelection] = useState<TextSelection | null>(null)
   const [isModifying, setIsModifying] = useState(false)
@@ -172,11 +174,19 @@ export default function ScriptEditor({ onNext }: ScriptEditorProps) {
         })
         setShowPreview(true)
       } else {
-        toast.error(data.error || 'Modification failed')
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: data.error || 'Modification failed'
+        })
       }
     } catch (error) {
       console.error('Modification error:', error)
-      toast.error('Failed to modify text. Please try again.')
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: 'Failed to modify text. Please try again.'
+      })
     } finally {
       setIsModifying(false)
     }

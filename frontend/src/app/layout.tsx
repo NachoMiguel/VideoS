@@ -5,6 +5,7 @@ import './globals.css'
 import { Toaster } from '@/components/ui/toaster'
 import { ReactPlugin } from '@stagewise-plugins/react'
 import { StagewiseToolbar } from '@stagewise/toolbar-next'
+import ErrorBoundary from '@/components/ErrorBoundary'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -24,11 +25,13 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body className={`${inter.className} min-h-screen bg-background antialiased`}>
-        <main className="relative flex min-h-screen flex-col">
-          {children}
-        </main>
-        <Toaster />
-        <StagewiseToolbar config={{ plugins: [ReactPlugin] }} />
+        <ErrorBoundary>
+          <main className="relative flex min-h-screen flex-col">
+            {children}
+          </main>
+          <Toaster />
+          <StagewiseToolbar config={{ plugins: [ReactPlugin] }} />
+        </ErrorBoundary>
       </body>
     </html>
   )

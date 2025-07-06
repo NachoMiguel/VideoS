@@ -77,6 +77,14 @@ class Settings(BaseSettings):
     api_usage_log: str = "logs/api_usage.log"
     error_log: str = "logs/errors.log"
     
+    # Sentry Configuration
+    sentry_dsn: str = ""
+    sentry_environment: str = "development"
+    sentry_release: Optional[str] = None
+    sentry_sample_rate: float = 1.0
+    sentry_traces_sample_rate: float = 0.1
+    sentry_enabled: bool = True
+    
     # Video processing settings
     max_video_file_size_bytes: int = 419430400  # 400MB
     max_videos_per_session: int = 3

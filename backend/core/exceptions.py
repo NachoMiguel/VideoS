@@ -4,12 +4,27 @@ These exceptions help with proper error handling and user feedback.
 """
 
 from typing import Optional
+import sentry_sdk
+from sentry_sdk import capture_exception, set_context, set_tag
 
 class AIVideoSlicerException(Exception):
     """Base exception class for AI Video Slicer."""
     def __init__(self, message: str, error_code: Optional[str] = None):
         self.message = message
         self.error_code = error_code
+        
+        # Automatically capture all custom exceptions in Sentry
+        set_context("custom_exception", {
+            "exception_type": type(self).__name__,
+            "message": message,
+            "error_code": error_code
+        })
+        set_tag("exception_category", "ai_video_slicer")
+        
+        # Only capture if Sentry is enabled
+        if sentry_sdk.Hub.current.client:
+            capture_exception(self)
+            
         super().__init__(self.message)
 
 class VideoProcessingError(AIVideoSlicerException):

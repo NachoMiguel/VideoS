@@ -9,6 +9,7 @@ import ProcessingStatus from '@/components/ProcessingStatus'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Badge } from '@/components/ui/badge'
 import { 
   FileText, 
   Video, 
@@ -109,7 +110,7 @@ export default function Home() {
       {/* Phase Tabs */}
       <div className="border-b">
         <div className="container mx-auto p-4">
-          <Tabs value={currentPhase} onValueChange={(value) => setCurrentPhase(value as any)}>
+          <Tabs value={currentPhase} onValueChange={(value: string) => setCurrentPhase(value as typeof currentPhase)}>
             <TabsList className="grid w-full grid-cols-5">
               {phases.map((phase) => (
                 <TabsTrigger key={phase.id} value={phase.id} className="flex items-center space-x-2">
@@ -171,26 +172,6 @@ export default function Home() {
           </Card>
         </div>
       </div>
-    </div>
-  )
-}
-
-// Badge component for the overview
-function Badge({ variant, className, children }: { 
-  variant: 'default' | 'secondary' | 'outline'
-  className?: string
-  children: React.ReactNode 
-}) {
-  const baseClasses = "inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold transition-colors"
-  const variantClasses = {
-    default: "border-transparent bg-primary text-primary-foreground hover:bg-primary/80",
-    secondary: "border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80",
-    outline: "text-foreground"
-  }
-  
-  return (
-    <div className={`${baseClasses} ${variantClasses[variant]} ${className || ''}`}>
-      {children}
     </div>
   )
 } 

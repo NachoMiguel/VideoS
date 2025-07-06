@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useToast } from '@/hooks/use-toast'
 import { useWebSocket } from '../hooks/useWebSocket'
 import SceneAnalysis from './SceneAnalysis'
+import * as Sentry from '@sentry/nextjs'
 import {
   PlayCircle,
   Scissors,
@@ -47,7 +48,7 @@ interface Scene {
   detected_actions: string[]
 }
 
-export const VideoProcessor: React.FC<VideoProcessorProps> = ({
+const VideoProcessor: React.FC<VideoProcessorProps> = ({
   onComplete,
   onError
 }) => {
@@ -76,6 +77,13 @@ export const VideoProcessor: React.FC<VideoProcessorProps> = ({
     try {
       const message = JSON.parse(event.data)
       
+      // Add WebSocket message context to Sentry
+      Sentry.setContext('websocket_message', {
+        type: message.type,
+        sessionId: state.sessionId,
+        timestamp: new Date().toISOString()
+      })
+      
       switch (message.type) {
         case 'progress':
           setState(prev => ({
@@ -88,6 +96,17 @@ export const VideoProcessor: React.FC<VideoProcessorProps> = ({
         case 'scenes':
           setScenes(message.scenes)
           setActiveTab('analysis')
+          
+          // Log scene analysis completion
+          Sentry.captureMessage('Scene analysis completed', {
+            level: 'info',
+            contexts: {
+              scenes: {
+                count: message.scenes.length,
+                sessionId: state.sessionId
+              }
+            }
+          })
           break
           
         case 'error':
@@ -96,6 +115,21 @@ export const VideoProcessor: React.FC<VideoProcessorProps> = ({
             status: 'error',
             error: message.error
           }))
+          
+          // Capture WebSocket errors
+          Sentry.captureException(new Error(message.error), {
+            contexts: {
+              websocket_error: {
+                sessionId: state.sessionId,
+                error: message.error
+              }
+            },
+            tags: {
+              source: 'websocket',
+              error_type: 'processing_error'
+            }
+          })
+          
           onError?.(message.error)
           break
           
@@ -105,16 +139,57 @@ export const VideoProcessor: React.FC<VideoProcessorProps> = ({
             status: 'completed',
             result: message.result
           }))
+          
+          // Log successful completion
+          Sentry.captureMessage('Video processing completed successfully', {
+            level: 'info',
+            contexts: {
+              completion: {
+                sessionId: state.sessionId,
+                result: message.result
+              }
+            }
+          })
+          
           onComplete?.(message.result)
           break
       }
     } catch (error) {
+      // Capture WebSocket message parsing errors
+      Sentry.captureException(error, {
+        contexts: {
+          websocket_parse_error: {
+            rawMessage: event.data,
+            sessionId: state.sessionId
+          }
+        },
+        tags: {
+          source: 'websocket',
+          error_type: 'parse_error'
+        }
+      })
+      
       console.error('Failed to parse WebSocket message:', error)
     }
   }
 
   const handleUpload = async (file: File) => {
+    const transaction = Sentry.startTransaction({
+      op: 'video_upload',
+      name: 'Video Upload'
+    })
+    
     try {
+      // Set user context for Sentry
+      Sentry.setContext('video_upload', {
+        filename: file.name,
+        fileSize: file.size,
+        fileType: file.type,
+        lastModified: file.lastModified
+      })
+      
+      Sentry.setTag('operation', 'video_upload')
+      
       setState(prev => ({
         ...prev,
         status: 'uploading',
@@ -124,17 +199,28 @@ export const VideoProcessor: React.FC<VideoProcessorProps> = ({
       const formData = new FormData()
       formData.append('file', file)
       
+      const uploadSpan = transaction.startChild({
+        op: 'http_request',
+        description: 'Upload video file'
+      })
+      
       const response = await fetch('/api/video/upload', {
         method: 'POST',
         body: formData
       })
       
+      uploadSpan.finish()
+      
       if (!response.ok) {
-        throw new Error('Upload failed')
+        const errorData = await response.json()
+        throw new Error(errorData.message || 'Upload failed')
       }
       
       const data = await response.json()
       const { session_id } = data
+      
+      // Set user ID for session tracking
+      Sentry.setUser({ id: session_id })
       
       setState(prev => ({
         ...prev,
@@ -143,21 +229,61 @@ export const VideoProcessor: React.FC<VideoProcessorProps> = ({
       }))
       
       setSelectedFile(file)
-              connect(`ws://localhost:8000/api/video/ws/${session_id}`)
+      connect(`ws://localhost:8000/api/video/ws/${session_id}`)
+      
+      // Log successful upload
+      Sentry.captureMessage('Video uploaded successfully', {
+        level: 'info',
+        contexts: {
+          upload: {
+            session_id,
+            filename: file.name,
+            fileSize: file.size
+          }
+        }
+      })
       
     } catch (error) {
+      // Capture upload errors with context
+      Sentry.captureException(error, {
+        contexts: {
+          upload_error: {
+            filename: file.name,
+            fileSize: file.size,
+            fileType: file.type
+          }
+        },
+        tags: {
+          operation: 'video_upload',
+          error_type: 'upload_failed'
+        }
+      })
+      
       toast({
         title: "Error",
         description: error instanceof Error ? error.message : 'Upload failed',
         variant: "destructive"
       })
+    } finally {
+      transaction.finish()
     }
   }
 
   const startProcessing = async () => {
     if (!state.sessionId) return
     
+    const transaction = Sentry.startTransaction({
+      op: 'video_processing',
+      name: 'Video Processing'
+    })
+    
     try {
+      Sentry.setContext('video_processing', {
+        sessionId: state.sessionId,
+        filename: selectedFile?.name,
+        fileSize: selectedFile?.size
+      })
+      
       setState(prev => ({
         ...prev,
         status: 'processing',
@@ -167,20 +293,49 @@ export const VideoProcessor: React.FC<VideoProcessorProps> = ({
       const response = await fetch(`/api/video/process/${state.sessionId}`, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'X-Session-ID': state.sessionId
         }
       })
       
       if (!response.ok) {
-        throw new Error('Processing failed')
+        const errorData = await response.json()
+        throw new Error(errorData.message || 'Processing failed')
       }
       
+      // Log successful processing start
+      Sentry.captureMessage('Video processing started', {
+        level: 'info',
+        contexts: {
+          processing: {
+            sessionId: state.sessionId,
+            filename: selectedFile?.name
+          }
+        }
+      })
+      
     } catch (error) {
+      // Capture processing errors with context
+      Sentry.captureException(error, {
+        contexts: {
+          processing_error: {
+            sessionId: state.sessionId,
+            filename: selectedFile?.name
+          }
+        },
+        tags: {
+          operation: 'video_processing',
+          error_type: 'processing_failed'
+        }
+      })
+      
       toast({
         title: "Error",
         description: error instanceof Error ? error.message : 'Processing failed',
         variant: "destructive"
       })
+    } finally {
+      transaction.finish()
     }
   }
 
@@ -272,4 +427,6 @@ export const VideoProcessor: React.FC<VideoProcessorProps> = ({
       </Tabs>
     </div>
   )
-} 
+}
+
+export default VideoProcessor 
