@@ -42,7 +42,7 @@ export default function CompletedPage({ onRestart }: CompletedPageProps) {
     setDownloadProgress(0)
 
     try {
-      const response = await fetch(`/api/download/${sessionId}`)
+      const response = await fetch(`/api/v1/download/${sessionId}`)
       
       if (!response.ok) {
         throw new Error('Failed to download video')

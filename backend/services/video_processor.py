@@ -4,10 +4,10 @@ from typing import List, Dict, Optional, Tuple
 import concurrent.futures
 from pathlib import Path
 import logging
-from ..core.parallel import ParallelProcessor
-from ..core.exceptions import VideoProcessingError, FaceDetectionError, ValidationError
-from ..core.config import VideoProcessingConfig, settings
-from ..core.session import SessionManager
+from core.parallel import ParallelProcessor
+from core.exceptions import VideoProcessingError, FaceDetectionError, ValidationError
+from core.config import VideoProcessingConfig, settings
+from core.session import SessionManager
 import os
 from core.credit_manager import credit_manager, ServiceType
 from core.parallel_error_handler import parallel_error_handler, OperationType, OperationResult

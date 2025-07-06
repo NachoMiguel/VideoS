@@ -16,16 +16,10 @@ from .character_persistence import character_persistence
 
 # Handle both relative and absolute imports
 try:
-    from ..core.config import settings
-    from ..core.exceptions import VideoProcessingError, FaceDetectionError
-    from ..core.parallel import parallel_processor, parallel_task
+    from core.config import settings
+    from core.exceptions import VideoProcessingError, FaceDetectionError
+    from core.parallel import parallel_processor, parallel_task
 except ImportError:
-    # Fallback for absolute imports
-    try:
-        from core.config import settings
-        from core.exceptions import VideoProcessingError, FaceDetectionError
-        from core.parallel import parallel_processor, parallel_task
-    except ImportError:
         # Create minimal fallback classes if imports fail
         class VideoProcessingError(Exception):
             pass

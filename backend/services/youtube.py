@@ -5,8 +5,8 @@ from googleapiclient.errors import HttpError
 import logging
 import re
 from datetime import datetime
-from ..core.config import settings
-from ..core.exceptions import VideoNotFoundError, TranscriptNotFoundError
+from core.config import settings
+from core.exceptions import VideoNotFoundError, TranscriptNotFoundError
 
 logger = logging.getLogger(__name__)
 

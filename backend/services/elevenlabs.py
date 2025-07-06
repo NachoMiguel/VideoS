@@ -7,11 +7,11 @@ from pathlib import Path
 import aiohttp
 import httpx
 import time
-from ..core.config import settings
-from ..core.exceptions import TTSGenerationError, VoiceNotFoundError, APIError, AudioGenerationError, CreditExhaustionError
-from ..core.parallel import parallel_processor, parallel_task
-from ..core.credit_manager import credit_manager, ServiceType
-from ..core.parallel_error_handler import OperationType
+from core.config import settings
+from core.exceptions import TTSGenerationError, VoiceNotFoundError, APIError, AudioGenerationError, CreditExhaustionError
+from core.parallel import parallel_processor, parallel_task
+from core.credit_manager import credit_manager, ServiceType
+from core.parallel_error_handler import OperationType
 import os
 import aiofiles
 

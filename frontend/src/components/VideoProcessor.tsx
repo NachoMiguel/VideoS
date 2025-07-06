@@ -143,7 +143,7 @@ export const VideoProcessor: React.FC<VideoProcessorProps> = ({
       }))
       
       setSelectedFile(file)
-      connect(`ws://localhost:8000/api/ws/${session_id}`)
+              connect(`ws://localhost:8000/api/video/ws/${session_id}`)
       
     } catch (error) {
       toast({
@@ -164,14 +164,11 @@ export const VideoProcessor: React.FC<VideoProcessorProps> = ({
         progress: 0
       }))
       
-      const response = await fetch('/api/video/process', {
+      const response = await fetch(`/api/video/process/${state.sessionId}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          session_id: state.sessionId
-        })
+        }
       })
       
       if (!response.ok) {

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Depends, Request
 from fastapi.responses import JSONResponse, FileResponse
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 import json
 import uuid
 import os
@@ -22,6 +22,11 @@ from services.elevenlabs import elevenlabs_service
 from services.image_search import image_search_service
 from core.credit_manager import credit_manager, CreditExhaustionError
 from core.parallel_error_handler import parallel_error_handler
+from core.session_manager import session_manager
+from services.youtube import YouTubeService
+from services.openai import OpenAIService
+from services.elevenlabs import ElevenLabsService
+from services.image_search import ImageSearchService
 
 router = APIRouter()
 
@@ -60,53 +65,114 @@ async def extract_transcript(
     """Extract transcript from YouTube video and optionally rewrite with AI."""
     try:
         session_id = str(uuid.uuid4())
-        session = SessionData(session_id)
-        active_sessions[session_id] = session
+        
+        # Create session using session_manager
+        session_data = {
+            "test_mode": use_saved_script and settings.TEST_MODE_ENABLED,
+            "youtube_url": youtube_url,
+            "use_default_prompt": use_default_prompt,
+            "custom_prompt": custom_prompt,
+            "use_saved_script": use_saved_script
+        }
+        
+        session = await session_manager.create_session(
+            session_id=session_id,
+            status="extracting_transcript",
+            metadata=session_data
+        )
         
         logger.info(f"Starting transcript extraction for session {session_id}")
         
         if use_saved_script and settings.TEST_MODE_ENABLED:
             # TEST MODE: Load saved script
             script_content = await load_saved_script()
-            session.script = {
+            script_data = {
                 "content": script_content,
                 "source": "saved",
                 "youtube_url": youtube_url
             }
-            session.status = "script_ready"
+            
+            # Update session with script data
+            await session_manager.update_session(
+                session_id=session_id,
+                status="script_ready",
+                script=script_data
+            )
+            
             logger.info(f"Loaded saved script for session {session_id}")
         else:
             # NORMAL MODE: Extract and process transcript
-            session.status = "extracting_transcript"
+            # Initialize services
+            youtube_service = YouTubeService()
+            openai_service = OpenAIService()
             
-            # Mock for now - will integrate actual services later
-            transcript = "Sample transcript content for development..."
-            
-            # Determine prompt to use
-            prompt = settings.DEFAULT_SCRIPT_REWRITE_PROMPT if use_default_prompt else custom_prompt
-            
-            # Mock rewritten script
-            rewritten_script = f"Rewritten script based on: {transcript[:100]}..."
-            
-            session.script = {
-                "content": rewritten_script,
-                "source": "generated",
-                "youtube_url": youtube_url,
-                "original_transcript": transcript,
-                "prompt_used": prompt
-            }
-            
-            session.status = "script_ready"
-            
-            # Log API usage
-            if not settings.TEST_MODE_ENABLED:
+            try:
+                # Extract video ID from URL
+                video_id = youtube_service.extract_video_id(youtube_url)
+                logger.info(f"Extracted video ID: {video_id}")
+                
+                # Get transcript from YouTube
+                transcript_data = await youtube_service.get_transcript(video_id)
+                
+                # Convert transcript data to text
+                transcript_text = ""
+                for entry in transcript_data:
+                    transcript_text += entry.get('text', '') + " "
+                
+                transcript = transcript_text.strip()
+                logger.info(f"Extracted transcript: {len(transcript)} characters")
+                
+                # Generate script using OpenAI
+                if use_default_prompt:
+                    prompt = settings.DEFAULT_SCRIPT_REWRITE_PROMPT
+                else:
+                    prompt = custom_prompt
+                
+                logger.info("Generating script with OpenAI...")
+                rewritten_script = await openai_service.generate_script(transcript, prompt)
+                
+                script_data = {
+                    "content": rewritten_script,
+                    "source": "generated",
+                    "youtube_url": youtube_url,
+                    "original_transcript": transcript,
+                    "prompt_used": prompt,
+                    "video_id": video_id
+                }
+                
+                # Update session with script data
+                await session_manager.update_session(
+                    session_id=session_id,
+                    status="script_ready",
+                    script=script_data
+                )
+                
+                # Log API usage
+                api_logger.log_api_usage("YouTube", "transcript_extraction", 1)
                 api_logger.log_api_usage("OpenAI", "script_rewrite", 1)
+                
+            except Exception as service_error:
+                logger.error(f"Service error during transcript extraction: {str(service_error)}")
+                # Update session with error status
+                await session_manager.update_session(
+                    session_id=session_id,
+                    status="error",
+                    error_message=str(service_error)
+                )
+                # Provide user-friendly error message
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Failed to process YouTube video: {str(service_error)}"
+                )
+        
+        # Get updated session for response
+        updated_session = await session_manager.get_session(session_id)
         
         return {
             "session_id": session_id,
-            "status": "script_ready",
-            "script": session.script,
-            "test_mode": session.test_mode
+            "status": updated_session.status,
+            "script": updated_session.metadata.get("script", {}),
+            "test_mode": updated_session.metadata.get("test_mode", False)
         }
         
     except Exception as e:
@@ -124,17 +190,17 @@ async def modify_script(request: Request):
         context_before = data.get("context_before", "")
         context_after = data.get("context_after", "")
         
-        if session_id not in active_sessions:
-            raise SessionNotFoundError("Session not found")
-        
-        session = active_sessions[session_id]
+        # Get session from session manager
+        session = await session_manager.get_session(session_id)
         
         # Use OpenAI service for context-aware modification
-        from ..services.openai import OpenAIService
         openai_service = OpenAIService()
         
+        # Check if session is in test mode from metadata
+        test_mode = session.metadata.get('test_mode', False)
+        
         # Skip API call in test mode
-        if session.test_mode:
+        if test_mode:
             # Mock modification for test mode
             mock_modifications = {
                 'shorten': f"[SHORTENED] {selected_text[:len(selected_text)//2]}...",
@@ -178,16 +244,16 @@ async def bulk_modify_script(request: Request):
         session_id = data.get("session_id")
         modifications = data.get("modifications", [])
         
-        if session_id not in active_sessions:
-            raise SessionNotFoundError("Session not found")
-        
-        session = active_sessions[session_id]
+        # Get session from session manager
+        session = await session_manager.get_session(session_id)
         
         # Use OpenAI service for bulk modifications
-        from ..services.openai import OpenAIService
         openai_service = OpenAIService()
         
-        if session.test_mode:
+        # Check if session is in test mode from metadata
+        test_mode = session.metadata.get('test_mode', False)
+        
+        if test_mode:
             # Mock bulk modifications for test mode
             results = []
             for i, mod in enumerate(modifications):
@@ -722,22 +788,33 @@ async def get_session_status(session_id: str):
 @router.get("/download/{session_id}")
 async def download_video(session_id: str):
     """Download the processed video."""
-    if session_id not in active_sessions:
-        raise SessionNotFoundError("Session not found")
+    try:
+        # Get session from session manager
+        session = await session_manager.get_session(session_id)
+        
+        if session.status != "completed":
+            raise HTTPException(status_code=400, detail="Video not ready for download")
+        
+        # Get output file from video results
+        video_results = session.metadata.get('video_results', {})
+        output_file = video_results.get('video_path')
+        
+        if not output_file:
+            raise HTTPException(status_code=404, detail="Output file not found in session")
+        
+        if not os.path.exists(output_file):
+            raise HTTPException(status_code=404, detail="Output file not found on disk")
+        
+        return FileResponse(
+            output_file,
+            media_type="video/mp4",
+            filename=f"ai_video_slicer_{session_id[:8]}.mp4"
+        )
     
-    session = active_sessions[session_id]
-    
-    if session.status != "completed" or not session.output_file:
-        raise HTTPException(status_code=400, detail="Video not ready for download")
-    
-    if not os.path.exists(session.output_file):
-        raise HTTPException(status_code=404, detail="Output file not found")
-    
-    return FileResponse(
-        session.output_file,
-        media_type="video/mp4",
-        filename=f"ai_video_slicer_{session_id[:8]}.mp4"
-    )
+    except Exception as e:
+        if "not found" in str(e).lower():
+            raise HTTPException(status_code=404, detail="Session not found")
+        raise HTTPException(status_code=500, detail=f"Download failed: {str(e)}")
 
 # ====== TEST MODE UTILITIES ======
 

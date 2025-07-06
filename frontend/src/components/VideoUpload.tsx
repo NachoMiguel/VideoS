@@ -110,7 +110,7 @@ export default function VideoUpload() {
 
         // Return a promise for the upload
         return new Promise((resolve, reject) => {
-          xhr.open('POST', '/api/upload-video')
+          xhr.open('POST', '/api/video/upload')
           
           xhr.onload = () => {
             if (xhr.status === 200) {

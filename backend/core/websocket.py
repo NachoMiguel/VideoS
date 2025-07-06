@@ -74,7 +74,15 @@ class WebSocketManager:
         """Send a completion message to all clients in a session."""
         message = {
             'type': 'completion',
-            'data': data
+            'result': data
+        }
+        await self.broadcast_to_session(session_id, message)
+
+    async def send_scenes(self, session_id: str, scenes: List[Dict]):
+        """Send scene analysis data to all clients in a session."""
+        message = {
+            'type': 'scenes',
+            'scenes': scenes
         }
         await self.broadcast_to_session(session_id, message)
 

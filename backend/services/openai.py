@@ -9,11 +9,11 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 import re
 import openai
 
-from ..core.config import settings
-from ..core.exceptions import AIGenerationError, APIError, APILimitError, OpenAIError
-from ..core.parallel import parallel_processor, parallel_task
-from ..core.credit_manager import credit_manager, ServiceType
-from ..core.parallel_error_handler import OperationType
+from core.config import settings
+from core.exceptions import AIGenerationError, APIError, APILimitError, OpenAIError
+from core.parallel import parallel_processor, parallel_task
+from core.credit_manager import credit_manager, ServiceType
+from core.parallel_error_handler import OperationType
 
 logger = logging.getLogger(__name__)
 

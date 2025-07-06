@@ -210,6 +210,125 @@ export default function LandingPage({ onStart }: LandingPageProps) {
         </div>
       </div>
 
+      {/* YouTube URL Input Form */}
+      <div className="max-w-2xl mx-auto">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Youtube className="h-5 w-5" />
+              Get Started with Your YouTube Video
+            </CardTitle>
+            <CardDescription>
+              Enter a YouTube URL to extract transcript and generate an AI-enhanced script
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              {/* YouTube URL Input */}
+              <div className="space-y-2">
+                <label htmlFor="youtube-url" className="text-sm font-medium">
+                  YouTube URL
+                </label>
+                <input
+                  id="youtube-url"
+                  type="url"
+                  value={youtubeUrl}
+                  onChange={(e) => setYoutubeUrl(e.target.value)}
+                  placeholder="https://www.youtube.com/watch?v=..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  required
+                />
+              </div>
+
+              {/* Default Prompt Toggle */}
+              <div className="flex items-center space-x-2">
+                <input
+                  id="default-prompt"
+                  type="checkbox"
+                  checked={useDefaultPrompt}
+                  onChange={(e) => setUseDefaultPrompt(e.target.checked)}
+                  className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                />
+                <label htmlFor="default-prompt" className="text-sm font-medium">
+                  Use default prompt for script rewriting
+                </label>
+              </div>
+
+              {/* Custom Prompt Input */}
+              {!useDefaultPrompt && (
+                <div className="space-y-2">
+                  <label htmlFor="custom-prompt" className="text-sm font-medium">
+                    Custom Prompt
+                  </label>
+                  <textarea
+                    id="custom-prompt"
+                    value={customPrompt}
+                    onChange={(e) => setCustomPrompt(e.target.value)}
+                    placeholder="Enter your custom prompt for script rewriting..."
+                    rows={4}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              )}
+
+              {/* Test Mode Options */}
+              {testMode && (
+                <div className="space-y-2 p-3 bg-blue-50 rounded-md">
+                  <div className="flex items-center space-x-2">
+                    <TestTube className="h-4 w-4 text-blue-600" />
+                    <span className="text-sm font-medium text-blue-600">Test Mode Options</span>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <input
+                      id="saved-script"
+                      type="checkbox"
+                      checked={useSavedScript}
+                      onChange={(e) => setUseSavedScript(e.target.checked)}
+                      className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                    />
+                    <label htmlFor="saved-script" className="text-sm">
+                      Use saved script (skip transcript extraction)
+                    </label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <input
+                      id="known-characters"
+                      type="checkbox"
+                      checked={useKnownCharacters}
+                      onChange={(e) => setUseKnownCharacters(e.target.checked)}
+                      className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                    />
+                    <label htmlFor="known-characters" className="text-sm">
+                      Use known characters (skip character detection)
+                    </label>
+                  </div>
+                </div>
+              )}
+
+              {/* Submit Button */}
+              <button
+                type="submit"
+                disabled={isLoading}
+                className={`w-full py-2 px-4 rounded-md text-white font-medium ${
+                  isLoading 
+                    ? 'bg-gray-400 cursor-not-allowed' 
+                    : 'bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500'
+                }`}
+              >
+                {isLoading ? (
+                  <div className="flex items-center justify-center space-x-2">
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    <span>Processing...</span>
+                  </div>
+                ) : (
+                  'Extract & Generate Script'
+                )}
+              </button>
+            </form>
+          </CardContent>
+        </Card>
+      </div>
+
       {/* Features Grid */}
       <div>
         <h2 className="text-2xl font-bold text-center mb-6">Key Features</h2>

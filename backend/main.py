@@ -9,7 +9,9 @@ from core.config import settings
 from core.logger import logger
 from core.exceptions import AIVideoSlicerException, get_user_friendly_message
 from api.routes import router as api_router
+from api.video_routes import router as video_router
 from api.websocket import websocket_router
+from core.background_tasks import startup_background_tasks, shutdown_background_tasks
 
 # Create FastAPI app
 app = FastAPI(
@@ -31,7 +33,19 @@ app.add_middleware(
 
 # Include API routes
 app.include_router(api_router, prefix=settings.API_V1_STR)
-app.include_router(websocket_router)
+app.include_router(video_router, prefix="/api/video")
+app.include_router(websocket_router, prefix="/api/video")
+
+# Event handlers
+@app.on_event("startup")
+async def startup_event():
+    """Start background tasks on application startup."""
+    await startup_background_tasks()
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Stop background tasks on application shutdown."""
+    await shutdown_background_tasks()
 
 # Static file serving for uploads/downloads
 if os.path.exists(settings.output_dir):

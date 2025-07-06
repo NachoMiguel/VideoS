@@ -8,7 +8,6 @@ import json
 from datetime import datetime, timedelta
 
 from core.logger import logger
-from core.exceptions import PersistenceError
 
 class CharacterPersistence:
     """Handles persistent storage and retrieval of trained character data."""

@@ -80,9 +80,25 @@ class Settings(BaseSettings):
     # Video processing settings
     max_video_file_size_bytes: int = 419430400  # 400MB
     max_videos_per_session: int = 3
+    max_concurrent_processing: int = 3  # Maximum concurrent video processing tasks
     
     # Scene settings
     concurrent_api_calls: int = 3
+    
+    # Session Management
+    session_timeout_minutes: int = 60  # Session timeout in minutes
+    cleanup_interval_minutes: int = 30  # Cleanup interval in minutes
+    max_active_sessions: int = 50  # Maximum number of active sessions
+    
+    # Performance Monitoring
+    performance_monitoring_enabled: bool = True
+    performance_report_interval_minutes: int = 60  # Generate performance report every hour
+    max_operation_history: int = 1000  # Keep last 1000 operations in memory
+    
+    # System Resource Limits
+    max_memory_usage_percent: float = 85.0  # Maximum memory usage before warnings
+    max_disk_usage_percent: float = 90.0  # Maximum disk usage before warnings
+    max_cpu_usage_percent: float = 90.0  # Maximum CPU usage before warnings
     
     class Config:
         env_file = ".env"

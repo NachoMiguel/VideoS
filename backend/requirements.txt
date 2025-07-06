@@ -44,6 +44,8 @@ tqdm==4.66.1
 loguru==0.7.2
 tenacity==8.2.3
 asyncio==3.4.3
+psutil==5.9.6
+aiofiles==23.2.1
 
 # Development and testing
 pytest==7.4.3

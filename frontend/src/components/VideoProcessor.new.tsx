@@ -110,7 +110,7 @@ export const VideoProcessor: React.FC<VideoProcessorProps> = ({ onComplete, onEr
       }));
       
       // Connect WebSocket for real-time updates
-      connect(`/api/video/ws/${session_id}`);
+      connect(`ws://localhost:8000/api/video/ws/${session_id}`);
       
       return false; // Prevent default upload behavior
     } catch (error) {

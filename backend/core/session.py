@@ -63,41 +63,56 @@ class SessionManager:
         self.session_timeout_minutes = 60
         self._load_sessions()
     
-    def create_session(self) -> Session:
+    async def create_session(self, session_id: str = None, initial_data: Dict[str, Any] = None) -> Session:
         """Create a new session."""
-        session_id = str(uuid.uuid4())
+        if session_id is None:
+            session_id = str(uuid.uuid4())
+        
         session = Session(session_id)
+        
+        # Apply initial data if provided
+        if initial_data:
+            for key, value in initial_data.items():
+                if hasattr(session, key):
+                    setattr(session, key, value)
+                else:
+                    session.metadata[key] = value
+        
         self.sessions[session_id] = session
         self._save_sessions()
+        logger.info(f"Created session {session_id}")
         return session
     
-    def get_session(self, session_id: str) -> Session:
+    async def get_session(self, session_id: str) -> Session:
         """Get session by ID."""
         if session_id not in self.sessions:
             raise SessionNotFoundError(f"Session {session_id} not found")
         
         session = self.sessions[session_id]
         if session.is_expired(self.session_timeout_minutes):
-            self.cleanup_session(session_id)
+            await self.cleanup_session(session_id)
             raise SessionExpiredError(f"Session {session_id} has expired")
         
         session.update_activity()
         self._save_sessions()
         return session
     
-    def update_session(self, session_id: str, **updates) -> Session:
+    async def update_session(self, session_id: str, **updates) -> Session:
         """Update session attributes."""
-        session = self.get_session(session_id)
+        session = await self.get_session(session_id)
         
         for key, value in updates.items():
             if hasattr(session, key):
                 setattr(session, key, value)
+            else:
+                session.metadata[key] = value
         
         session.update_activity()
         self._save_sessions()
+        logger.debug(f"Updated session {session_id}: {list(updates.keys())}")
         return session
     
-    def cleanup_session(self, session_id: str):
+    async def cleanup_session(self, session_id: str):
         """Clean up session and its resources."""
         if session_id not in self.sessions:
             return
@@ -108,14 +123,26 @@ class SessionManager:
         if session.output_file and Path(session.output_file).exists():
             try:
                 Path(session.output_file).unlink()
+                logger.info(f"Cleaned up output file: {session.output_file}")
             except Exception as e:
                 logger.error(f"Failed to delete output file: {e}")
+        
+        # Clean up any temp files associated with session
+        temp_dir = Path(settings.temp_dir) / session_id
+        if temp_dir.exists():
+            try:
+                import shutil
+                shutil.rmtree(temp_dir)
+                logger.info(f"Cleaned up session temp directory: {temp_dir}")
+            except Exception as e:
+                logger.error(f"Failed to delete session temp directory: {e}")
         
         # Remove session
         del self.sessions[session_id]
         self._save_sessions()
+        logger.info(f"Cleaned up session {session_id}")
     
-    def cleanup_expired_sessions(self):
+    async def cleanup_expired_sessions(self):
         """Clean up all expired sessions."""
         expired_sessions = [
             session_id
@@ -124,7 +151,10 @@ class SessionManager:
         ]
         
         for session_id in expired_sessions:
-            self.cleanup_session(session_id)
+            await self.cleanup_session(session_id)
+        
+        if expired_sessions:
+            logger.info(f"Cleaned up {len(expired_sessions)} expired sessions")
     
     def _save_sessions(self):
         """Save sessions to file."""
@@ -156,8 +186,7 @@ class SessionManager:
                 for session_id, data in sessions_data.items()
             }
             
-            # Clean up expired sessions on load
-            self.cleanup_expired_sessions()
+            logger.info(f"Loaded {len(self.sessions)} sessions from file")
             
         except Exception as e:
             logger.error(f"Failed to load sessions: {e}")
