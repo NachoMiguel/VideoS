@@ -7,14 +7,9 @@ import { Youtube, Settings, TestTube, Zap } from 'lucide-react'
 import { useToast } from "@/hooks/use-toast"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
 import { Play, Video, Users, Star, CheckCircle, FileText } from 'lucide-react'
 
-interface LandingPageProps {
-  onStart?: () => void
-}
-
-export default function LandingPage({ onStart }: LandingPageProps) {
+export default function LandingPage() {
   const { 
     youtubeUrl, 
     useDefaultPrompt, 
@@ -30,7 +25,6 @@ export default function LandingPage({ onStart }: LandingPageProps) {
   const { 
     testMode, 
     useSavedScript,
-    setTestMode, 
     setUseSavedScript,
     loadTestResources,
     useKnownCharacters,
@@ -96,15 +90,15 @@ export default function LandingPage({ onStart }: LandingPageProps) {
 
       const data = await response.json()
       
-      // Update store with response
+      // Update store with response and navigate to script step
       setSessionId(data.session_id)
       setScript(data.script)
+      setCurrentStep('script')
       
       toast({
         title: "Success",
         description: "Script generated successfully!"
       })
-      setCurrentStep('script')
       
     } catch (error) {
       console.error('Error processing YouTube URL:', error)
@@ -151,39 +145,6 @@ export default function LandingPage({ onStart }: LandingPageProps) {
     }
   ]
 
-  const phases = [
-    {
-      phase: "Phase 1",
-      title: "Foundation & UI",
-      status: "Completed",
-      description: "Basic setup and user interface"
-    },
-    {
-      phase: "Phase 2",
-      title: "Core Backend Services",
-      status: "Completed", 
-      description: "Parallel processing architecture and API endpoints"
-    },
-    {
-      phase: "Phase 3",
-      title: "Script Processing Pipeline",
-      status: "Completed",
-      description: "Advanced script editing with context-aware AI"
-    },
-    {
-      phase: "Phase 4",
-      title: "Enhanced Video Processing",
-      status: "Active",
-      description: "Parallel video analysis and intelligent scene detection"
-    },
-    {
-      phase: "Phase 5",
-      title: "Advanced UI Components",
-      status: "Pending",
-      description: "Real-time processing monitoring and results display"
-    }
-  ]
-
   return (
     <div className="space-y-8">
       {/* Hero Section */}
@@ -198,16 +159,6 @@ export default function LandingPage({ onStart }: LandingPageProps) {
           Create compelling video compilations using AI-powered scene detection, 
           face recognition, and intelligent script processing
         </p>
-        <div className="flex items-center justify-center space-x-4">
-          <Badge variant="default" className="text-sm">
-            <Zap className="h-3 w-3 mr-1" />
-            Phase 4 Active
-          </Badge>
-          <Badge variant="secondary" className="text-sm">
-            <Settings className="h-3 w-3 mr-1" />
-            Parallel Processing
-          </Badge>
-        </div>
       </div>
 
       {/* YouTube URL Input Form */}
@@ -350,45 +301,7 @@ export default function LandingPage({ onStart }: LandingPageProps) {
           ))}
         </div>
       </div>
-
-      {/* Phase Progress */}
-      <div>
-        <h2 className="text-2xl font-bold text-center mb-6">Development Progress</h2>
-        <div className="space-y-4">
-          {phases.map((phase, index) => (
-            <Card key={index}>
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-4">
-                    <div className="flex items-center space-x-2">
-                      <Badge 
-                        variant={phase.status === "Completed" ? "default" : 
-                                phase.status === "Active" ? "secondary" : "outline"}
-                        className="w-16 text-center"
-                      >
-                        {phase.phase}
-                      </Badge>
-                      <h3 className="font-semibold">{phase.title}</h3>
-                    </div>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <Badge 
-                      variant={phase.status === "Completed" ? "default" : 
-                              phase.status === "Active" ? "secondary" : "outline"}
-                    >
-                      {phase.status}
-                    </Badge>
-                  </div>
-                </div>
-                <p className="text-sm text-muted-foreground mt-2">
-                  {phase.description}
-                </p>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      </div>
-
+      
       {/* CTA Section */}
       <div className="text-center space-y-4">
         <Card className="max-w-md mx-auto">
@@ -400,7 +313,10 @@ export default function LandingPage({ onStart }: LandingPageProps) {
           </CardHeader>
           <CardContent>
             <Button 
-              onClick={onStart} 
+              onClick={() => {
+                // Scroll to top to show the form
+                window.scrollTo({ top: 0, behavior: 'smooth' })
+              }} 
               size="lg" 
               className="w-full"
             >

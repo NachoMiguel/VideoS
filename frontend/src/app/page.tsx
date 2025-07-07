@@ -1,96 +1,93 @@
 'use client'
 
-import { useState } from 'react'
 import LandingPage from '@/components/LandingPage'
 import ScriptEditor from '@/components/ScriptEditor'
 import VideoProcessor from '@/components/VideoProcessor'
 import CompletedPage from '@/components/CompletedPage'
 import ProcessingStatus from '@/components/ProcessingStatus'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Badge } from '@/components/ui/badge'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useVideoStore } from '@/stores/videoStore'
+import { useTestModeStore } from '@/stores/testModeStore'
 import { 
   FileText, 
   Video, 
   Settings, 
   CheckCircle, 
   Zap,
-  Play,
-  Users,
-  Star
+  Star,
+  Lock
 } from 'lucide-react'
 
 export default function Home() {
-  const [currentPhase, setCurrentPhase] = useState<'landing' | 'script' | 'video' | 'processing' | 'completed'>('landing')
-  const [testMode, setTestMode] = useState(false)
+  // Fix: Use centralized video store instead of local state
+  const { currentStep, script, videos } = useVideoStore()
+  const { testMode, setTestMode } = useTestModeStore()
 
+  // Define workflow phases with proper access control
   const phases = [
     {
       id: 'landing',
       title: 'Landing Page',
       description: 'Welcome and project overview',
-      icon: <Star className="h-4 w-4" />
+      icon: <Star className="h-4 w-4" />,
+      accessible: true // Always accessible
     },
     {
-      id: 'script',
+      id: 'script', 
       title: 'Script Editor',
-      description: 'Advanced script editing with AI',
-      icon: <FileText className="h-4 w-4" />
+      description: 'Review and edit your script',
+      icon: <FileText className="h-4 w-4" />,
+      accessible: !!script // Accessible only if script exists
     },
     {
-      id: 'video',
-      title: 'Video Processor',
-      description: 'Phase 4: Enhanced parallel video processing',
-      icon: <Video className="h-4 w-4" />
+      id: 'upload',
+      title: 'Video Upload', 
+      description: 'Upload your videos',
+      icon: <Video className="h-4 w-4" />,
+      accessible: !!script // Accessible only if script exists
     },
     {
       id: 'processing',
-      title: 'Processing Status',
-      description: 'Real-time processing monitoring',
-      icon: <Zap className="h-4 w-4" />
+      title: 'Processing',
+      description: 'Video processing in progress',
+      icon: <Zap className="h-4 w-4" />,
+      accessible: !!script && videos.length > 0 // Script + videos required
     },
     {
       id: 'completed',
-      title: 'Completed Page',
-      description: 'Final results and download',
-      icon: <CheckCircle className="h-4 w-4" />
+      title: 'Complete',
+      description: 'Download your result',
+      icon: <CheckCircle className="h-4 w-4" />,
+      accessible: currentStep === 'completed' // Only when actually completed
     }
   ]
 
   const renderCurrentPhase = () => {
-    switch (currentPhase) {
+    switch (currentStep) {
       case 'landing':
-        return <LandingPage onStart={() => setCurrentPhase('script')} />
+        return <LandingPage />
       case 'script':
-        return <ScriptEditor onNext={() => setCurrentPhase('video')} />
-      case 'video':
+        return <ScriptEditor />
+      case 'upload':
         return <VideoProcessor />
       case 'processing':
-        return <ProcessingStatus onComplete={() => setCurrentPhase('completed')} />
+        return <ProcessingStatus />
       case 'completed':
-        return <CompletedPage onRestart={() => setCurrentPhase('landing')} />
+        return <CompletedPage />
       default:
-        return <LandingPage onStart={() => setCurrentPhase('script')} />
+        return <LandingPage />
     }
   }
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Phase Navigation */}
+      {/* Clean Navigation Header */}
       <div className="border-b bg-card">
         <div className="container mx-auto p-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-4">
               <h1 className="text-xl font-bold">AI Video Slicer</h1>
-              <div className="flex items-center space-x-2">
-                <Badge variant="outline" className="text-xs">
-                  Phase 4
-                </Badge>
-                <Badge variant={testMode ? "default" : "secondary"} className="text-xs">
-                  {testMode ? "Test Mode" : "Production"}
-                </Badge>
-              </div>
             </div>
             
             <div className="flex items-center space-x-2">
@@ -107,14 +104,29 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Phase Tabs */}
+      {/* Workflow Progress Indicator (NOT Navigation) */}
       <div className="border-b">
         <div className="container mx-auto p-4">
-          <Tabs value={currentPhase} onValueChange={(value: string) => setCurrentPhase(value as typeof currentPhase)}>
+          <Tabs value={currentStep} className="w-full">
             <TabsList className="grid w-full grid-cols-5">
               {phases.map((phase) => (
-                <TabsTrigger key={phase.id} value={phase.id} className="flex items-center space-x-2">
-                  {phase.icon}
+                <TabsTrigger 
+                  key={phase.id} 
+                  value={phase.id} 
+                  disabled={!phase.accessible}
+                  className={`flex items-center space-x-2 ${
+                    !phase.accessible 
+                      ? 'opacity-50 cursor-not-allowed' 
+                      : currentStep === phase.id 
+                        ? 'bg-primary text-primary-foreground' 
+                        : ''
+                  }`}
+                >
+                  {!phase.accessible ? (
+                    <Lock className="h-3 w-3" />
+                  ) : (
+                    phase.icon
+                  )}
                   <span className="hidden sm:inline">{phase.title}</span>
                 </TabsTrigger>
               ))}
@@ -127,51 +139,6 @@ export default function Home() {
       <main className="container mx-auto py-6">
         {renderCurrentPhase()}
       </main>
-
-      {/* Phase Overview */}
-      <div className="border-t bg-muted/50">
-        <div className="container mx-auto p-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Zap className="h-5 w-5" />
-                Phase 4 Features
-              </CardTitle>
-              <CardDescription>
-                Enhanced parallel video processing with intelligent scene detection
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="flex items-center space-x-2">
-                  <Video className="h-4 w-4 text-blue-500" />
-                  <span className="text-sm">Parallel Video Analysis</span>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <Users className="h-4 w-4 text-green-500" />
-                  <span className="text-sm">Face Recognition</span>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <Star className="h-4 w-4 text-yellow-500" />
-                  <span className="text-sm">Quality Scoring</span>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <Play className="h-4 w-4 text-purple-500" />
-                  <span className="text-sm">Scene Detection</span>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <Zap className="h-4 w-4 text-orange-500" />
-                  <span className="text-sm">3-5x Performance</span>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <CheckCircle className="h-4 w-4 text-green-500" />
-                  <span className="text-sm">Intelligent Selection</span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
     </div>
   )
 } 

@@ -19,9 +19,7 @@ import {
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 
-interface ProcessingStatusProps {
-  onComplete: () => void
-}
+interface ProcessingStatusProps {}
 
 interface ProcessingStep {
   id: string
@@ -35,7 +33,7 @@ interface ProcessingStep {
   error?: string
 }
 
-export default function ProcessingStatus({ onComplete }: ProcessingStatusProps) {
+export default function ProcessingStatus() {
   const [steps, setSteps] = useState<ProcessingStep[]>([
     {
       id: 'video_analysis',
@@ -67,7 +65,7 @@ export default function ProcessingStatus({ onComplete }: ProcessingStatusProps) 
     }
   ])
 
-  const { sessionId } = useVideoStore()
+  const { sessionId, setCurrentStep } = useVideoStore()
 
   useEffect(() => {
     if (!sessionId) return
@@ -127,7 +125,7 @@ export default function ProcessingStatus({ onComplete }: ProcessingStatusProps) 
         endTime: step.endTime || Date.now()
       }))
     )
-    onComplete()
+    setCurrentStep('completed')
   }
 
   const handleError = (error: string) => {

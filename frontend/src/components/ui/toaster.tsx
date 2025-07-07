@@ -1,46 +1,37 @@
-'use client'
+"use client"
 
-import { useEffect, useState } from 'react'
-import { ReactPlugin } from '@stagewise-plugins/react'
-import { StagewiseToolbar } from '@stagewise/toolbar-next'
+import {
+  Toast,
+  ToastClose,
+  ToastDescription,
+  ToastProvider,
+  ToastTitle,
+  ToastViewport,
+} from "@/components/ui/toast"
+import { useToast } from "@/hooks/use-toast"
 
-export default function ClientStagewiseToolbar() {
-  const [shouldRender, setShouldRender] = useState(false)
-  const [hasError, setHasError] = useState(false)
+export function Toaster() {
+  const { toasts } = useToast()
 
-  useEffect(() => {
-    // Only render in development mode
-    if (process.env.NODE_ENV !== 'development') {
-      return
-    }
-
-    // Delay rendering until after hydration to avoid SSR/client mismatches
-    // and ensure React internals are fully initialized
-    const timer = setTimeout(() => {
-      setShouldRender(true)
-    }, 100)
-
-    return () => clearTimeout(timer)
-  }, [])
-
-  // Don't render if not in development or if there was an error
-  if (process.env.NODE_ENV !== 'development' || !shouldRender || hasError) {
-    return null
-  }
-
-  // Error boundary for the StagewiseToolbar to prevent crashes
-  try {
-    return (
-      <div style={{ position: 'fixed', zIndex: 9999 }}>
-        <StagewiseToolbar 
-          config={{ plugins: [ReactPlugin] }}
-        />
-      </div>
-    )
-  } catch (error) {
-    // Fallback if StagewiseToolbar throws during render
-    console.warn('StagewiseToolbar failed to render (non-critical development tool):', error)
-    setHasError(true)
-    return null
-  }
+  return (
+    <ToastProvider>
+      {toasts.map(function ({ id, title, description, action, ...props }) {
+        return (
+          <Toast key={id} {...props}>
+            <div className="grid gap-1">
+              {title && <ToastTitle>{title}</ToastTitle>}
+              {description && (
+                <ToastDescription>{description}</ToastDescription>
+              )}
+            </div>
+            {action}
+            <ToastClose />
+          </Toast>
+        )
+      })}
+      <ToastViewport />
+    </ToastProvider>
+  )
 }
+
+export default Toaster
