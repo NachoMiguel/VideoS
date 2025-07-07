@@ -149,7 +149,7 @@ async def health_check():
         "status": "healthy",
         "service": settings.PROJECT_NAME,
         "version": "1.0.0",
-        "test_mode": settings.TEST_MODE_ENABLED
+        "test_mode": settings.test_mode_enabled
     }
 
 # Root endpoint
@@ -162,24 +162,7 @@ async def root():
         "health": "/health"
     }
 
-# Startup event
-@app.on_event("startup")
-async def startup_event():
-    logger.info(f"Starting {settings.PROJECT_NAME} API server")
-    logger.info(f"Test mode: {'Enabled' if settings.TEST_MODE_ENABLED else 'Disabled'}")
-    
-    # Verify critical directories exist
-    directories = [
-        settings.upload_dir,
-        settings.output_dir,
-        settings.cache_dir,
-        settings.temp_dir
-    ]
-    
-    for directory in directories:
-        if not os.path.exists(directory):
-            os.makedirs(directory, exist_ok=True)
-            logger.info(f"Created directory: {directory}")
+
 
 # Shutdown event
 @app.on_event("shutdown")

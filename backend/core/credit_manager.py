@@ -59,7 +59,7 @@ class CreditManager:
     def _initialize_accounts(self):
         """Initialize accounts from environment variables."""
         # OpenAI Account
-        openai_key = os.getenv('OPENAI_API_KEY')
+        openai_key = settings.openai_api_key
         if openai_key:
             self.accounts[ServiceType.OPENAI] = [
                 AccountInfo(
@@ -73,25 +73,22 @@ class CreditManager:
         
         # ElevenLabs Accounts (4 accounts)
         elevenlabs_accounts = []
-        for i in range(1, 5):
-            key_name = f'ELEVENLABS_API_KEY{"" if i == 1 else f"_{i}"}'
-            api_key = os.getenv(key_name)
-            if api_key:
-                elevenlabs_accounts.append(
-                    AccountInfo(
-                        service=ServiceType.ELEVENLABS,
-                        api_key=api_key,
-                        account_id=f"elevenlabs_{i}",
-                        monthly_limit=30000,  # 30,000 characters per account
-                        last_reset=datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-                    )
+        for i, api_key in enumerate(settings.elevenlabs_api_keys, 1):
+            elevenlabs_accounts.append(
+                AccountInfo(
+                    service=ServiceType.ELEVENLABS,
+                    api_key=api_key,
+                    account_id=f"elevenlabs_{i}",
+                    monthly_limit=30000,  # 30,000 characters per account
+                    last_reset=datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
                 )
+            )
         
         if elevenlabs_accounts:
             self.accounts[ServiceType.ELEVENLABS] = elevenlabs_accounts
         
         # Google Custom Search Account
-        gcs_key = os.getenv('GOOGLE_CUSTOM_SEARCH_API_KEY')
+        gcs_key = settings.google_custom_search_api_key
         if gcs_key:
             self.accounts[ServiceType.GOOGLE_SEARCH] = [
                 AccountInfo(

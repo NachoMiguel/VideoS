@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from typing import List, Optional
 from pydantic_settings import BaseSettings
 
@@ -9,10 +10,21 @@ class Settings(BaseSettings):
     
     # API Keys
     openai_api_key: str = ""
-    elevenlabs_api_keys: List[str] = []
+    elevenlabs_api_key_1: str = ""
+    elevenlabs_api_key_2: str = ""
+    elevenlabs_api_key_3: str = ""
+    elevenlabs_api_key_4: str = ""
     google_custom_search_api_key: str = ""
     google_custom_search_engine_id: str = ""
     youtube_api_key: str = ""
+    
+    # ElevenLabs Service Settings
+    elevenlabs_voice_id: str = "nPczCjzI2devNBz1zQrb"  # Default Bella voice
+    elevenlabs_model_id: str = "eleven_monolingual_v1"
+    elevenlabs_timeout: int = 30
+    elevenlabs_retry_attempts: int = 3
+    max_credits_per_account: int = 10000
+    credit_warning_threshold: float = 0.8
     
     # File Upload Settings
     max_file_size: int = 400 * 1024 * 1024  # 400MB
@@ -60,6 +72,28 @@ class Settings(BaseSettings):
     # Test Mode
     test_mode_enabled: bool = False
     development_skip_mode: bool = False
+    
+    # Test Mode Configuration
+    use_saved_script: bool = False
+    use_known_characters: bool = False
+    use_saved_audio: bool = False
+    
+    # Test Data Directories
+    test_scripts_dir: str = "test_data/scripts"
+    test_audio_dir: str = "test_data/audio"
+    test_characters_dir: str = "test_data/characters"
+    
+    # Default Prompts
+    default_script_rewrite_prompt: str = """
+Rewrite the following video transcript into an engaging, natural-sounding script suitable for video narration.
+Make it more conversational and add appropriate pauses and emphasis.
+Keep the core message intact while making it more engaging for viewers.
+
+Transcript:
+{transcript}
+
+Please provide only the rewritten script without any additional commentary.
+"""
     
     # Parallel Processing Settings
     parallel_processing: bool = True
@@ -109,24 +143,19 @@ class Settings(BaseSettings):
     max_cpu_usage_percent: float = 90.0  # Maximum CPU usage before warnings
     
     class Config:
-        env_file = ".env"
+        env_file = Path(__file__).parent.parent / ".env"  # Absolute path to backend/.env
         case_sensitive = False
         extra = "ignore"  # Ignore extra fields from .env
         
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        
-        # Parse ElevenLabs API keys from environment
-        for i in range(1, 5):  # Support up to 4 accounts
-            key = os.getenv(f"ELEVENLABS_API_KEY_{i}")
-            if key:
-                self.elevenlabs_api_keys.append(key)
-        
-        # Fallback to single key if no numbered keys found
-        if not self.elevenlabs_api_keys:
-            single_key = os.getenv("ELEVENLABS_API_KEY")
-            if single_key:
-                self.elevenlabs_api_keys.append(single_key)
+    @property
+    def elevenlabs_api_keys(self) -> List[str]:
+        """Get all configured ElevenLabs API keys as a list."""
+        keys = []
+        for key in [self.elevenlabs_api_key_1, self.elevenlabs_api_key_2, 
+                    self.elevenlabs_api_key_3, self.elevenlabs_api_key_4]:
+            if key:  # Only add non-empty keys
+                keys.append(key)
+        return keys
     
     @property
     def has_required_keys(self) -> bool:
@@ -136,6 +165,37 @@ class Settings(BaseSettings):
             self.elevenlabs_api_keys and
             self.youtube_api_key
         )
+    
+    @property
+    def has_partial_elevenlabs_config(self) -> bool:
+        """Check if at least one ElevenLabs API key is configured."""
+        return len(self.elevenlabs_api_keys) > 0
+    
+    @property
+    def elevenlabs_config_status(self) -> dict:
+        """Get detailed ElevenLabs configuration status."""
+        return {
+            "total_keys": len(self.elevenlabs_api_keys),
+            "has_keys": len(self.elevenlabs_api_keys) > 0,
+            "optimal_keys": len(self.elevenlabs_api_keys) >= 2,  # At least 2 for rotation
+            "max_keys": len(self.elevenlabs_api_keys) == 4,  # Maximum supported
+            "missing_keys": 4 - len(self.elevenlabs_api_keys),
+            "voice_id_configured": bool(self.elevenlabs_voice_id),
+            "model_id_configured": bool(self.elevenlabs_model_id),
+        }
+    
+    def validate_elevenlabs_config(self) -> tuple[bool, str]:
+        """Validate ElevenLabs configuration and return status."""
+        if not self.elevenlabs_api_keys:
+            return False, "No ElevenLabs API keys configured. Please set ELEVENLABS_API_KEY_1 through ELEVENLABS_API_KEY_4 in your .env file."
+        
+        if len(self.elevenlabs_api_keys) == 1:
+            return True, f"ElevenLabs configured with 1 API key (limited throughput). Consider adding more keys for better performance."
+        
+        if len(self.elevenlabs_api_keys) < 4:
+            return True, f"ElevenLabs configured with {len(self.elevenlabs_api_keys)} API keys. You can add up to {4 - len(self.elevenlabs_api_keys)} more for optimal performance."
+        
+        return True, f"ElevenLabs optimally configured with {len(self.elevenlabs_api_keys)} API keys."
     
     @property
     def parallel_processing_enabled(self) -> bool:
@@ -149,6 +209,32 @@ class Settings(BaseSettings):
     def insightface_gpu_enabled(self) -> bool:
         """Check if GPU is available and enabled for InsightFace."""
         return "CUDAExecutionProvider" in self.insightface_providers
+    
+    # Backward compatibility properties for screaming snake case
+    @property
+    def TEST_MODE_ENABLED(self) -> bool:
+        """Backward compatibility property for TEST_MODE_ENABLED."""
+        return self.test_mode_enabled
+    
+    @property
+    def USE_SAVED_SCRIPT(self) -> bool:
+        """Backward compatibility property for USE_SAVED_SCRIPT."""
+        return self.use_saved_script
+    
+    @property
+    def USE_KNOWN_CHARACTERS(self) -> bool:
+        """Backward compatibility property for USE_KNOWN_CHARACTERS."""
+        return self.use_known_characters
+    
+    @property
+    def USE_SAVED_AUDIO(self) -> bool:
+        """Backward compatibility property for USE_SAVED_AUDIO."""
+        return self.use_saved_audio
+    
+    @property
+    def DEFAULT_SCRIPT_REWRITE_PROMPT(self) -> str:
+        """Backward compatibility property for DEFAULT_SCRIPT_REWRITE_PROMPT."""
+        return self.default_script_rewrite_prompt
 
 # Global settings instance
 settings = Settings() 

@@ -263,8 +263,13 @@ class PerformanceMonitor:
                 ]
             }
             
-            reports_dir = Path(settings.temp_dir) / "performance_reports"
-            reports_dir.mkdir(exist_ok=True)
+            # Ensure temp directory exists first
+            temp_dir = Path(settings.temp_dir)
+            temp_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Create performance reports directory
+            reports_dir = temp_dir / "performance_reports"
+            reports_dir.mkdir(parents=True, exist_ok=True)
             
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             report_file = reports_dir / f"performance_report_{timestamp}.json"

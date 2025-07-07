@@ -1,6 +1,7 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Depends, Request
 from fastapi.responses import JSONResponse, FileResponse
 from typing import List, Optional, Dict, Any
+from pydantic import BaseModel
 import json
 import uuid
 import os
@@ -22,7 +23,7 @@ from services.elevenlabs import elevenlabs_service
 from services.image_search import image_search_service
 from core.credit_manager import credit_manager, CreditExhaustionError
 from core.parallel_error_handler import parallel_error_handler
-from core.session_manager import session_manager
+from core.session import manager as session_manager
 from services.youtube import YouTubeService
 from services.openai import OpenAIService
 from services.elevenlabs import ElevenLabsService
@@ -32,6 +33,14 @@ router = APIRouter()
 
 # In-memory session storage (in production, use Redis or database)
 active_sessions = {}
+
+# Request models
+class ProcessVideoRequest(BaseModel):
+    """Request model for video processing endpoint."""
+    video_path: str
+    script_content: str
+    test_mode: bool = False
+    test_settings: Optional[Dict[str, Any]] = None
 
 # Session models
 class SessionData:
@@ -48,10 +57,10 @@ class SessionData:
         self.error = None
         
         # Test mode settings
-        self.test_mode = settings.TEST_MODE_ENABLED
-        self.use_saved_script = settings.USE_SAVED_SCRIPT
-        self.use_known_characters = settings.USE_KNOWN_CHARACTERS
-        self.use_saved_audio = settings.USE_SAVED_AUDIO
+        self.test_mode = settings.test_mode_enabled
+        self.use_saved_script = settings.use_saved_script
+        self.use_known_characters = settings.use_known_characters
+        self.use_saved_audio = settings.use_saved_audio
 
 # ====== SCRIPT PROCESSING ENDPOINTS ======
 
@@ -68,7 +77,7 @@ async def extract_transcript(
         
         # Create session using session_manager
         session_data = {
-            "test_mode": use_saved_script and settings.TEST_MODE_ENABLED,
+            "test_mode": use_saved_script and settings.test_mode_enabled,
             "youtube_url": youtube_url,
             "use_default_prompt": use_default_prompt,
             "custom_prompt": custom_prompt,
@@ -83,7 +92,7 @@ async def extract_transcript(
         
         logger.info(f"Starting transcript extraction for session {session_id}")
         
-        if use_saved_script and settings.TEST_MODE_ENABLED:
+        if use_saved_script and settings.test_mode_enabled:
             # TEST MODE: Load saved script
             script_content = await load_saved_script()
             script_data = {
@@ -846,7 +855,7 @@ async def load_saved_script() -> str:
 @router.get("/test-data/scripts")
 async def list_saved_scripts():
     """List available saved scripts for test mode."""
-    if not settings.TEST_MODE_ENABLED:
+    if not settings.test_mode_enabled:
         raise HTTPException(status_code=403, detail="Test mode not enabled")
     
     scripts_dir = settings.TEST_SCRIPTS_DIR
@@ -868,7 +877,7 @@ async def list_saved_scripts():
 @router.get("/test-data/audio")
 async def list_saved_audio():
     """List available saved audio files for test mode."""
-    if not settings.TEST_MODE_ENABLED:
+    if not settings.test_mode_enabled:
         raise HTTPException(status_code=403, detail="Test mode not enabled")
     
     audio_dir = settings.TEST_AUDIO_DIR
@@ -1275,7 +1284,7 @@ async def process_video(request: ProcessVideoRequest):
     session_id = None
     try:
         # Generate session ID
-        session_id = generate_session_id()
+        session_id = str(uuid.uuid4())
         logger.info(f"Starting enhanced video processing for session: {session_id}")
         
         # Initialize session

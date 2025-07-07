@@ -217,7 +217,10 @@ export default function ScriptEditor({ onNext }: ScriptEditorProps) {
     setShowPreview(false)
     setTextSelection(null)
     
-    toast.success(`Text ${modificationPreview.action} applied successfully`)
+    toast({ 
+      title: `Text ${modificationPreview.action} applied successfully`,
+      variant: "success" 
+    })
   }
 
   // Reject modification
@@ -232,7 +235,10 @@ export default function ScriptEditor({ onNext }: ScriptEditorProps) {
       const previousState = history[historyIndex - 1]
       setScript({ ...script, content: previousState.content })
       setHistoryIndex(historyIndex - 1)
-      toast.success('Undone')
+      toast({ 
+        title: 'Undone',
+        variant: "success" 
+      })
     }
   }
 
@@ -241,23 +247,35 @@ export default function ScriptEditor({ onNext }: ScriptEditorProps) {
       const nextState = history[historyIndex + 1]
       setScript({ ...script, content: nextState.content })
       setHistoryIndex(historyIndex + 1)
-      toast.success('Redone')
+      toast({ 
+        title: 'Redone',
+        variant: "success" 
+      })
     }
   }
 
   // Handle bulk modifications (future feature)
   const handleBulkModification = async () => {
     // Implementation for bulk modifications
-    toast('Bulk modifications coming soon!', { icon: 'ℹ️' })
+    toast({ 
+      title: 'Bulk modifications coming soon!',
+      description: 'ℹ️'
+    })
   }
 
   const handleProceed = () => {
     if (!script?.content.trim()) {
-      toast.error('Script cannot be empty')
+      toast({ 
+        title: 'Script cannot be empty',
+        variant: "destructive" 
+      })
       return
     }
 
-    toast.success('Script ready! Proceeding to video upload...')
+    toast({ 
+      title: 'Script ready! Proceeding to video upload...',
+      variant: "success" 
+    })
     setCurrentStep('upload')
   }
 

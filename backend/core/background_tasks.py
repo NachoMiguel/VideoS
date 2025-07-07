@@ -11,6 +11,7 @@ from core.config import settings
 from core.logger import logger
 from core.session import manager as session_manager
 from core.performance_monitor import monitor as performance_monitor
+from pathlib import Path
 
 class BackgroundTaskManager:
     """Manages background tasks for cleanup and monitoring."""
@@ -204,7 +205,34 @@ manager = BackgroundTaskManager()
 # Startup and shutdown handlers
 async def startup_background_tasks():
     """Start background tasks on application startup."""
+    # Create required directories
+    await _create_required_directories()
+    
+    # Start background task manager
     await manager.start()
+
+async def _create_required_directories():
+    """Create all required directories for the application."""
+    directories = [
+        settings.upload_dir,
+        settings.output_dir,
+        settings.temp_dir,
+        settings.cache_dir,
+        settings.test_scripts_dir,
+        settings.test_audio_dir,
+        settings.test_characters_dir,
+        f"{settings.temp_dir}/performance_reports",
+        "logs"
+    ]
+    
+    for dir_path in directories:
+        try:
+            Path(dir_path).mkdir(parents=True, exist_ok=True)
+            logger.debug(f"Created directory: {dir_path}")
+        except Exception as e:
+            logger.error(f"Failed to create directory {dir_path}: {e}")
+            # Don't fail startup for directory creation issues
+            pass
 
 async def shutdown_background_tasks():
     """Stop background tasks on application shutdown."""

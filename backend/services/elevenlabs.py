@@ -21,8 +21,17 @@ class ElevenLabsService:
     """Enhanced ElevenLabs service with parallel processing and multi-account rotation."""
     
     def __init__(self):
-        if not settings.elevenlabs_api_keys:
-            raise ElevenLabsError("ElevenLabs API keys not configured")
+        # Validate configuration with detailed status
+        config_valid, config_message = settings.validate_elevenlabs_config()
+        
+        if not config_valid:
+            logger.error(f"ElevenLabs configuration error: {config_message}")
+            raise ElevenLabsError(f"ElevenLabs API keys not configured: {config_message}")
+        
+        # Log configuration status
+        logger.info(f"ElevenLabs initialization: {config_message}")
+        config_status = settings.elevenlabs_config_status
+        logger.info(f"Configuration details: {config_status}")
         
         self.api_keys = settings.elevenlabs_api_keys
         self.current_key_index = 0
@@ -43,6 +52,12 @@ class ElevenLabsService:
         self.base_url = "https://api.elevenlabs.io/v1"
         self.voice_cache = {}
         self.usage_tracker = {key: 0 for key in self.api_keys if key}
+        
+        # Performance warnings
+        if len(self.api_keys) == 1:
+            logger.warning("Running with single ElevenLabs API key - throughput will be limited")
+        elif len(self.api_keys) < 4:
+            logger.info(f"Running with {len(self.api_keys)} ElevenLabs API keys - consider adding more for optimal performance")
         
         logger.info(f"ElevenLabs service initialized with {len(self.api_keys)} accounts, parallel processing: {self.parallel_enabled}")
     
@@ -803,5 +818,36 @@ class ElevenLabsService:
             "available_keys": len([key for key in self.api_keys if key])
         }
 
-# Global service instance
-elevenlabs_service = ElevenLabsService() 
+    def get_configuration_status(self) -> dict:
+        """Get current configuration status for monitoring/debugging."""
+        return {
+            "service_initialized": True,
+            "total_api_keys": len(self.api_keys),
+            "parallel_enabled": self.parallel_enabled,
+            "max_concurrent": self.max_concurrent,
+            "voice_id": self.voice_id,
+            "model_id": self.model_id,
+            "timeout": self.timeout,
+            "credit_usage": self.credit_usage,
+            "config_status": settings.elevenlabs_config_status
+        }
+
+# Global service instance placeholder
+_elevenlabs_service: Optional[ElevenLabsService] = None
+
+def get_elevenlabs_service() -> ElevenLabsService:
+    """Get or create the ElevenLabs service instance with lazy initialization."""
+    global _elevenlabs_service
+    if _elevenlabs_service is None:
+        _elevenlabs_service = ElevenLabsService()
+    return _elevenlabs_service
+
+# Legacy compatibility - this will now use lazy initialization
+@property
+def elevenlabs_service() -> ElevenLabsService:
+    """Legacy property for backward compatibility."""
+    return get_elevenlabs_service()
+
+# Create a module-level property that acts like the old global instance
+import sys
+sys.modules[__name__].elevenlabs_service = property(lambda self: get_elevenlabs_service()) 
