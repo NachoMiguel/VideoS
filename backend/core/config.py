@@ -83,16 +83,46 @@ class Settings(BaseSettings):
     test_audio_dir: str = "test_data/audio"
     test_characters_dir: str = "test_data/characters"
     
+    # Test Mode Character Configuration
+    test_known_characters: List[str] = ["Jean Claude Vandamme", "Steven Seagal"]
+    
     # Default Prompts
     default_script_rewrite_prompt: str = """
-Rewrite the following video transcript into an engaging, natural-sounding script suitable for video narration.
-Make it more conversational and add appropriate pauses and emphasis.
-Keep the core message intact while making it more engaging for viewers.
+    I need you to transform this YouTube transcript into a high-retention, engaging script that keeps viewers hooked from start to finish. Here's my specific approach:
+
+CONTENT TRANSFORMATION GOALS:
+1. Create a flowing narrative that feels like a compelling story, not a transcript summary
+2. Use the transcript as raw material but elevate it with engaging storytelling techniques
+3. Target 20,000-30,000 characters for optimal content length
+4. Maintain natural, conversational flow throughout
+
+ENGAGEMENT TECHNIQUES TO INCLUDE:
+- Open with a powerful hook that immediately grabs attention
+- Use smooth transitions that build anticipation for what's coming next
+- Include mysterious or intriguing elements that create curiosity gaps
+- Add emotional moments and relatable human experiences
+- Use varied sentence lengths and rhythms to maintain interest
+- Include strategic pauses and emphasis points for dramatic effect
+
+STRUCTURE REQUIREMENTS:
+- Strong opening that sets up the entire narrative
+- Progressive revelation of information that builds engagement
+- Multiple "mini-climaxes" throughout to maintain attention
+- Satisfying conclusion that ties everything together
+- No section breaks, headers, or bullet points - pure flowing narrative
+
+TONE AND STYLE:
+- Conversational and engaging, like telling a story to a friend
+- Slightly mysterious and intriguing where appropriate
+- Authentic and relatable, avoiding robotic or formulaic language
+- Dynamic pacing that speeds up and slows down for dramatic effect
+
+Transform the following transcript into this type of engaging, complete script:
 
 Transcript:
 {transcript}
 
-Please provide only the rewritten script without any additional commentary.
+Provide only the final script - no explanations, no structure notes, just the complete flowing narrative ready to use.
 """
     
     # Parallel Processing Settings
@@ -132,15 +162,7 @@ Please provide only the rewritten script without any additional commentary.
     cleanup_interval_minutes: int = 30  # Cleanup interval in minutes
     max_active_sessions: int = 50  # Maximum number of active sessions
     
-    # Performance Monitoring
-    performance_monitoring_enabled: bool = True
-    performance_report_interval_minutes: int = 60  # Generate performance report every hour
-    max_operation_history: int = 1000  # Keep last 1000 operations in memory
-    
-    # System Resource Limits
-    max_memory_usage_percent: float = 85.0  # Maximum memory usage before warnings
-    max_disk_usage_percent: float = 90.0  # Maximum disk usage before warnings
-    max_cpu_usage_percent: float = 90.0  # Maximum CPU usage before warnings
+    # REMOVED: Performance monitoring settings (were consuming excessive resources during startup)
     
     class Config:
         env_file = Path(__file__).parent.parent / ".env"  # Absolute path to backend/.env
@@ -198,43 +220,39 @@ Please provide only the rewritten script without any additional commentary.
         return True, f"ElevenLabs optimally configured with {len(self.elevenlabs_api_keys)} API keys."
     
     @property
-    def parallel_processing_enabled(self) -> bool:
-        """Check if parallel processing is enabled and feasible."""
-        return (
-            self.parallel_processing and 
-            self.max_workers > 1
-        )
-    
-    @property
     def insightface_gpu_enabled(self) -> bool:
-        """Check if GPU is available and enabled for InsightFace."""
+        """Check if GPU support is enabled for InsightFace."""
         return "CUDAExecutionProvider" in self.insightface_providers
     
-    # Backward compatibility properties for screaming snake case
     @property
     def TEST_MODE_ENABLED(self) -> bool:
-        """Backward compatibility property for TEST_MODE_ENABLED."""
+        """Property for test mode compatibility."""
         return self.test_mode_enabled
     
     @property
     def USE_SAVED_SCRIPT(self) -> bool:
-        """Backward compatibility property for USE_SAVED_SCRIPT."""
+        """Property for test mode compatibility."""
         return self.use_saved_script
     
     @property
     def USE_KNOWN_CHARACTERS(self) -> bool:
-        """Backward compatibility property for USE_KNOWN_CHARACTERS."""
+        """Property for test mode compatibility."""
         return self.use_known_characters
     
     @property
     def USE_SAVED_AUDIO(self) -> bool:
-        """Backward compatibility property for USE_SAVED_AUDIO."""
+        """Property for test mode compatibility."""
         return self.use_saved_audio
     
     @property
     def DEFAULT_SCRIPT_REWRITE_PROMPT(self) -> str:
-        """Backward compatibility property for DEFAULT_SCRIPT_REWRITE_PROMPT."""
+        """Property for prompt compatibility."""
         return self.default_script_rewrite_prompt
+
+    @property
+    def KNOWN_CHARACTERS(self) -> List[str]:
+        """Property for backward compatibility with test character references."""
+        return self.test_known_characters
 
 # Global settings instance
 settings = Settings() 

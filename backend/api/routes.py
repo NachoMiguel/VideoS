@@ -642,9 +642,9 @@ async def process_video_pipeline(session_id: str):
             if session.script and session.script.get("content"):
                 characters = await openai_service.extract_characters_from_script(session.script["content"])
             else:
-                characters = ["Jean Claude Vandamme", "Steven Seagal"]  # Fallback
+                characters = settings.test_known_characters  # Use centralized config
         else:
-            characters = settings.KNOWN_CHARACTERS
+            characters = settings.test_known_characters
         
         session.characters = characters
         await manager.send_progress(session_id, 15, "characters_extracted", f"Found {len(characters)} characters")
