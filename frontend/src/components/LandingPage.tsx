@@ -78,7 +78,7 @@ export default function LandingPage() {
       }
 
       // Call backend API
-      const response = await fetch('/api/extract-transcript', {
+      const response = await fetch('/api/v1/extract-transcript', {
         method: 'POST',
         body: formData,
       })

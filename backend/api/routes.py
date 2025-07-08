@@ -84,10 +84,15 @@ async def extract_transcript(
             "use_saved_script": use_saved_script
         }
         
+        # Combine status and metadata into initial_data
+        initial_data = {
+            "status": "extracting_transcript",
+            **session_data  # Merge metadata into initial_data
+        }
+        
         session = await session_manager.create_session(
             session_id=session_id,
-            status="extracting_transcript",
-            metadata=session_data
+            initial_data=initial_data
         )
         
         logger.info(f"Starting transcript extraction for session {session_id}")

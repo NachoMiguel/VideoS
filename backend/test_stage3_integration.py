@@ -61,8 +61,8 @@ class Stage3IntegrationTester:
         # Test 1: Session Management
         await self.test_session_management()
         
-        # Test 2: Performance Monitoring
-        await self.test_performance_monitoring()
+        # Test 2: Performance Monitoring - DISABLED (performance monitor removed)
+        # await self.test_performance_monitoring()
         
         # Test 3: Error Handling
         await self.test_error_handling()

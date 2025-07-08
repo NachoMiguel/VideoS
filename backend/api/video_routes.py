@@ -12,7 +12,6 @@ from core.config import settings
 from core.session import manager as session_manager
 from video.processor import VideoProcessor
 from core.exceptions import VideoProcessingError
-from core.performance_monitor import monitor as performance_monitor
 
 # Import the unified WebSocket manager
 from api.websocket import manager as websocket_manager
@@ -24,12 +23,8 @@ async def upload_video(file: UploadFile = File(...)) -> Dict:
     """Upload a video file for processing."""
     session_id = None
     file_path = None
-    operation_key = None
     
     try:
-        # Start performance monitoring
-        file_size_mb = getattr(file, 'size', 0) / 1024 / 1024 if hasattr(file, 'size') else 0
-        operation_key = performance_monitor.start_operation("upload", "video_upload", file_size_mb)
         # Validate file
         if not file.filename:
             raise HTTPException(status_code=400, detail="No filename provided")
@@ -70,10 +65,6 @@ async def upload_video(file: UploadFile = File(...)) -> Dict:
             'progress': 0
         })
 
-        # Complete performance monitoring
-        if operation_key:
-            performance_monitor.complete_operation(operation_key, success=True)
-        
         return {
             'session_id': session_id,
             'status': 'uploaded',
@@ -82,10 +73,6 @@ async def upload_video(file: UploadFile = File(...)) -> Dict:
         }
 
     except HTTPException:
-        # Complete performance monitoring with error
-        if operation_key:
-            performance_monitor.complete_operation(operation_key, success=False, error="HTTP error")
-        
         # Clean up on HTTP errors
         if file_path and file_path.exists():
             try:
@@ -94,10 +81,6 @@ async def upload_video(file: UploadFile = File(...)) -> Dict:
                 pass
         raise
     except Exception as e:
-        # Complete performance monitoring with error
-        if operation_key:
-            performance_monitor.complete_operation(operation_key, success=False, error=str(e))
-        
         # Clean up on any other errors
         if file_path and file_path.exists():
             try:
@@ -174,13 +157,7 @@ async def process_video(session_id: str) -> Dict:
 async def process_video_background(session_id: str, file_path: str, processor: VideoProcessor, 
                                   websocket_manager, session_manager):
     """Background task for video processing with real-time updates."""
-    operation_key = None
-    
     try:
-        # Start performance monitoring for processing
-        file_size_mb = Path(file_path).stat().st_size / 1024 / 1024
-        operation_key = performance_monitor.start_operation(session_id, "video_processing", file_size_mb)
-        
         # Send progress updates throughout processing
         await websocket_manager.send_progress(session_id, 10, 'processing', 'Analyzing video structure...')
         
@@ -206,15 +183,7 @@ async def process_video_background(session_id: str, file_path: str, processor: V
             'processing_time': result.get('duration', 0)
         })
         
-        # Complete performance monitoring
-        if operation_key:
-            performance_monitor.complete_operation(operation_key, success=True)
-        
     except Exception as e:
-        # Complete performance monitoring with error
-        if operation_key:
-            performance_monitor.complete_operation(operation_key, success=False, error=str(e))
-        
         await session_manager.update_session(session_id, status='error', error=str(e))
         await websocket_manager.send_error(session_id, str(e))
 

@@ -23,10 +23,23 @@ class OpenAIService:
     """Enhanced OpenAI service with parallel processing and context-aware script modifications."""
     
     def __init__(self):
-        # Remove the direct API key setting - will be managed by credit manager
+        # Initialize basic configuration
         self.model = "gpt-3.5-turbo"
         self.max_tokens = 4000
-        logger.info("OpenAI service initialized with credit management")
+        self.temperature = 0.7
+        self.timeout = 30.0
+        
+        # Initialize OpenAI client using credit manager
+        try:
+            account = credit_manager.get_available_account(ServiceType.OPENAI)
+            self.client = AsyncOpenAI(
+                api_key=account.api_key,
+                timeout=self.timeout
+            )
+            logger.info(f"OpenAI service initialized with account: {account.account_id}")
+        except Exception as e:
+            logger.error(f"Failed to initialize OpenAI service: {str(e)}")
+            raise AIGenerationError(f"OpenAI service initialization failed: {str(e)}")
         
         # Load prompts from prompts.md
         self.prompts = self._load_prompts()
@@ -39,6 +52,8 @@ class OpenAIService:
             'make_engaging': 'Make Engaging',
             'delete': 'Delete'
         }
+        
+        logger.info("OpenAI service initialized with credit management")
     
     def _load_prompts(self) -> Dict[str, str]:
         """Load prompts from prompts.md file."""
@@ -192,6 +207,15 @@ Provide only the connecting text (can be empty if contexts connect naturally).
                 sentry_sdk.capture_message(
                     f"Script generation successful - {len(result)} characters generated",
                     level="info"
+                )
+                
+                # After successful OpenAI API call
+                await credit_manager.record_usage(
+                    ServiceType.OPENAI,
+                    account.account_id,
+                    "script_generation",
+                    0.01,  # Cost estimate
+                    success=True
                 )
                 
                 return result
