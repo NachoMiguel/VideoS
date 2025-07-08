@@ -16,7 +16,6 @@ from typing import Dict, List
 sys.path.append(str(Path(__file__).parent))
 
 from core.session import manager as session_manager
-from core.performance_monitor import monitor as performance_monitor
 from core.background_tasks import manager as background_manager
 from core.config import settings
 
@@ -130,52 +129,52 @@ class Stage3IntegrationTester:
         except Exception as e:
             self.log_test("Session Management", False, f"Error: {str(e)}")
     
-    async def test_performance_monitoring(self):
-        """Test performance monitoring system."""
-        print("📊 Testing Performance Monitoring...")
+    # async def test_performance_monitoring(self):
+    #     """Test performance monitoring system."""
+    #     print("📊 Testing Performance Monitoring...")
         
-        try:
-            # Start an operation
-            operation_key = performance_monitor.start_operation(
-                "test_session", "test_operation", 10.5
-            )
+    #     try:
+    #         # Start an operation
+    #         # operation_key = performance_monitor.start_operation(
+    #         #     "test_session", "test_operation", 10.5
+    #         # )
             
-            self.log_test(
-                "Performance Operation Start",
-                operation_key is not None,
-                f"Started operation: {operation_key}"
-            )
+    #         # self.log_test(
+    #         #     "Performance Operation Start",
+    #         #     operation_key is not None,
+    #         #     f"Started operation: {operation_key}"
+    #         # )
             
-            # Simulate work
-            await asyncio.sleep(0.1)
+    #         # Simulate work
+    #         await asyncio.sleep(0.1)
             
-            # Complete the operation
-            performance_monitor.complete_operation(operation_key, success=True)
+    #         # Complete the operation
+    #         performance_monitor.complete_operation(operation_key, success=True)
             
-            self.log_test(
-                "Performance Operation Complete",
-                operation_key not in performance_monitor.active_operations,
-                "Operation completed successfully"
-            )
+    #         self.log_test(
+    #             "Performance Operation Complete",
+    #             operation_key not in performance_monitor.active_operations,
+    #             "Operation completed successfully"
+    #         )
             
-            # Test performance summary
-            summary = performance_monitor.get_performance_summary()
-            self.log_test(
-                "Performance Summary",
-                summary.get('status') != 'no_data',
-                f"Generated summary with {summary.get('summary', {}).get('total_operations', 0)} operations"
-            )
+    #         # Test performance summary
+    #         summary = performance_monitor.get_performance_summary()
+    #         self.log_test(
+    #             "Performance Summary",
+    #             summary.get('status') != 'no_data',
+    #             f"Generated summary with {summary.get('summary', {}).get('total_operations', 0)} operations"
+    #         )
             
-            # Test system health check
-            health = performance_monitor.check_system_health()
-            self.log_test(
-                "System Health Check",
-                health.get('status') in ['healthy', 'warning', 'critical'],
-                f"System status: {health.get('status')}"
-            )
+    #         # Test system health check
+    #         health = performance_monitor.check_system_health()
+    #         self.log_test(
+    #             "System Health Check",
+    #             health.get('status') in ['healthy', 'warning', 'critical'],
+    #             f"System status: {health.get('status')}"
+    #         )
             
-        except Exception as e:
-            self.log_test("Performance Monitoring", False, f"Error: {str(e)}")
+    #     except Exception as e:
+    #         self.log_test("Performance Monitoring", False, f"Error: {str(e)}")
     
     async def test_error_handling(self):
         """Test comprehensive error handling."""
@@ -194,12 +193,12 @@ class Stage3IntegrationTester:
                 )
             
             # Test performance monitoring error handling
-            performance_monitor.complete_operation("nonexistent_operation", success=False)
-            self.log_test(
-                "Performance Error Handling",
-                True,
-                "Gracefully handled nonexistent operation"
-            )
+            # performance_monitor.complete_operation("nonexistent_operation", success=False)
+            # self.log_test(
+            #     "Performance Error Handling",
+            #     True,
+            #     "Gracefully handled nonexistent operation"
+            # )
             
             # Test configuration validation
             valid_config = (

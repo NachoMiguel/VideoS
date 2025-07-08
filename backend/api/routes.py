@@ -392,11 +392,11 @@ async def validate_video_file(file: UploadFile) -> None:
         file.file.seek(0)  # Reset position
         
         if size > settings.max_video_file_size_bytes:
-            raise ValidationError(
+            raise VideoValidationError(
                 f"Video file size ({size / 1024 / 1024:.1f}MB) exceeds maximum limit of 400MB"
             )
     except Exception as e:
-        raise ValidationError(f"Failed to validate video file: {str(e)}")
+        raise VideoValidationError(f"Failed to validate video file: {str(e)}")
 
 # ====== PROCESSING ENDPOINTS ======
 
@@ -532,7 +532,7 @@ async def _identify_characters(faces: List[Dict], known_characters: List[Dict] =
             # Calculate face embeddings if not present
             if 'embedding' not in face:
                 try:
-                    face_embedding = await face_detector.get_face_embedding(face)
+                    face_embedding = await detector.get_face_embedding(face)
                 except Exception as e:
                     logger.warning(f"Could not extract embedding for face: {str(e)}")
                     continue
@@ -1217,7 +1217,7 @@ async def validate_file_size(file: UploadFile) -> None:
         # Check file size
         file_size = temp_file.stat().st_size
         if file_size > settings.max_video_file_size_bytes:
-            raise ValidationError(
+            raise VideoValidationError(
                 f"Video file size ({file_size / 1024 / 1024:.1f}MB) exceeds maximum limit of 400MB"
             )
         
@@ -1244,7 +1244,7 @@ async def upload_video(
         
         # Check number of videos
         if len(session.videos) >= settings.max_videos_per_session:
-            raise ValidationError(f"Maximum {settings.max_videos_per_session} videos allowed per session")
+            raise VideoValidationError(f"Maximum {settings.max_videos_per_session} videos allowed per session")
             
         # Validate file size
         await validate_file_size(file)
@@ -1305,12 +1305,12 @@ async def process_video(request: ProcessVideoRequest):
         logger.info(f"Account status at processing start: {account_status}")
         
         # Process video with enhanced pipeline
-        video_processor = VideoProcessor()
+        video_processor = processor
         result = await video_processor.process_video_pipeline(
             session_id=session_id,
             video_path=request.video_path,
             script_content=request.script_content,
-            websocket_manager=websocket_manager,
+            websocket_manager=manager,
             test_mode=request.test_mode,
             test_settings=request.test_settings or {}
         )

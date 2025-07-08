@@ -8,8 +8,6 @@ from openai import AsyncOpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential
 import re
 import openai
-import sentry_sdk
-from sentry_sdk import capture_exception, capture_message, set_context, set_tag
 
 from core.config import settings
 from core.exceptions import AIGenerationError, APIError, APILimitError, OpenAIError
@@ -169,77 +167,50 @@ Provide only the connecting text (can be empty if contexts connect naturally).
     )
     async def generate_script(self, transcript: str, custom_prompt: Optional[str] = None) -> str:
         """Generate a new script from the transcript using the default or custom prompt."""
-        with sentry_sdk.start_transaction(op="openai_script_generation", name="generate_script"):
-            try:
-                # Set Sentry context for better error tracking
-                set_context("openai_operation", {
-                    "operation": "generate_script",
-                    "transcript_length": len(transcript),
-                    "custom_prompt": custom_prompt is not None,
-                    "model": self.model
-                })
-                set_tag("service", "openai")
-                set_tag("operation", "script_generation")
-                
-                if custom_prompt:
-                    prompt = custom_prompt.format(transcript=transcript)
-                else:
-                    prompt_template = self.prompts.get('basic_youtube_content_analysis', 
-                                                     self._get_default_prompts()['basic_youtube_content_analysis'])
-                    prompt = prompt_template.format(transcript=transcript)
-                
-                # Create span for API call
-                with sentry_sdk.start_span(op="openai_api_call", description="Chat completion request"):
-                    response = await self.client.chat.completions.create(
-                        model=self.model,
-                        messages=[
-                            {"role": "system", "content": "You are an expert video script writer specializing in creating engaging content for video assembly."},
-                            {"role": "user", "content": prompt}
-                        ],
-                        temperature=self.temperature,
-                        max_tokens=self.max_tokens,
-                        timeout=self.timeout
-                    )
-                
-                result = response.choices[0].message.content.strip()
-                
-                # Log successful operation
-                sentry_sdk.capture_message(
-                    f"Script generation successful - {len(result)} characters generated",
-                    level="info"
-                )
-                
-                # After successful OpenAI API call
-                await credit_manager.record_usage(
-                    ServiceType.OPENAI,
-                    account.account_id,
-                    "script_generation",
-                    0.01,  # Cost estimate
-                    success=True
-                )
-                
-                return result
+        try:
+            if custom_prompt:
+                prompt = custom_prompt.format(transcript=transcript)
+            else:
+                prompt_template = self.prompts.get('basic_youtube_content_analysis', 
+                                                    self._get_default_prompts()['basic_youtube_content_analysis'])
+                prompt = prompt_template.format(transcript=transcript)
+            
+            # Get account and make API call
+            account = credit_manager.get_available_account(ServiceType.OPENAI)
 
-            except openai.APIError as e:
-                # Capture OpenAI specific errors with context
-                capture_exception(e)
-                set_context("openai_error", {
-                    "error_type": "api_error",
-                    "status_code": getattr(e, 'status_code', None),
-                    "error_code": getattr(e, 'code', None)
-                })
-                logger.error(f"OpenAI API error: {str(e)}")
-                raise OpenAIError(f"OpenAI API error: {str(e)}")
-                
-            except Exception as e:
-                # Capture all other errors
-                capture_exception(e)
-                set_context("script_generation_error", {
-                    "transcript_length": len(transcript),
-                    "error_type": type(e).__name__
-                })
-                logger.error(f"Script generation error: {str(e)}")
-                raise AIGenerationError(f"Failed to generate script: {str(e)}")
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "You are an expert video script writer specializing in creating engaging content for video assembly."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+                timeout=self.timeout
+            )
+
+            result = response.choices[0].message.content.strip()
+
+            # After successful OpenAI API call
+            await credit_manager.record_usage(
+                ServiceType.OPENAI,
+                account.account_id,
+                "script_generation",
+                0.01,  # Cost estimate
+                success=True
+            )
+            
+            return result
+
+        except openai.APIError as e:
+            # Removed Sentry calls
+            logger.error(f"OpenAI API error: {str(e)}")
+            raise OpenAIError(f"OpenAI API error: {str(e)}")
+            
+        except Exception as e:
+            # Removed Sentry calls
+            logger.error(f"Script generation error: {str(e)}")
+            raise AIGenerationError(f"Failed to generate script: {str(e)}")
     
     @parallel_task('api_call')
     async def modify_script_context_aware(
