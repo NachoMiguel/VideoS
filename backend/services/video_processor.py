@@ -4,10 +4,8 @@ from typing import List, Dict, Optional, Tuple
 import concurrent.futures
 from pathlib import Path
 import logging
-import sentry_sdk
-from sentry_sdk import capture_exception, capture_message, set_context, set_tag, set_user
 from core.parallel import ParallelProcessor
-from core.exceptions import VideoProcessingError, FaceDetectionError, ValidationError
+from core.exceptions import VideoProcessingError, FaceDetectionError, ValidationError, CreditExhaustionError
 from core.config import VideoProcessingConfig, settings
 from core.session import SessionManager
 import os
@@ -25,114 +23,81 @@ class VideoProcessor:
 
     async def process_video(self, video_path: str, session_id: str) -> Dict:
         """Process a video file with parallel frame processing and face detection."""
-        with sentry_sdk.start_transaction(op="video_processing", name="process_video"):
-            try:
-                # Set Sentry context for video processing
-                set_context("video_processing", {
-                    "video_path": video_path,
-                    "session_id": session_id,
-                    "max_workers": self.config.max_workers,
-                    "batch_size": self.config.batch_size
-                })
-                set_tag("service", "video_processor")
-                set_tag("operation", "process_video")
-                set_user({"id": session_id})
-                
-                cap = cv2.VideoCapture(video_path)
-                if not cap.isOpened():
-                    error_msg = f"Failed to open video file: {video_path}"
-                    capture_message(error_msg, level="error")
-                    raise VideoProcessingError(error_msg)
+        try:
+            cap = cv2.VideoCapture(video_path)
+            if not cap.isOpened():
+                error_msg = f"Failed to open video file: {video_path}"
+                self.logger.error(error_msg)
+                raise VideoProcessingError(error_msg)
 
-                total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-                fps = cap.get(cv2.CAP_PROP_FPS)
-                
-                # Add video metadata to Sentry context
-                set_context("video_metadata", {
-                    "total_frames": total_frames,
-                    "fps": fps,
-                    "duration": total_frames / fps if fps > 0 else 0
-                })
-                
-                # Update session with video metadata
-                await self.session_manager.update_session(session_id, {
-                    'total_frames': total_frames,
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            
+            # Add video metadata to Sentry context
+            # REMOVED: set_context("video_metadata", { ... })
+            
+            # Update session with video metadata
+            await self.session_manager.update_session(session_id, {
+                'total_frames': total_frames,
+                'fps': fps,
+                'status': 'processing'
+            })
+
+            frames_data = []
+            with concurrent.futures.ThreadPoolExecutor(max_workers=self.config.max_workers) as executor:
+                frame_futures = []
+                frame_count = 0
+
+                while True:
+                    ret, frame = cap.read()
+                    if not ret:
+                        break
+
+                    future = executor.submit(self._process_frame, frame, frame_count)
+                    frame_futures.append(future)
+                    frame_count += 1
+
+                    # Process results in batches
+                    if len(frame_futures) >= self.config.batch_size:
+                        frames_data.extend(self._process_futures_batch(frame_futures))
+                        frame_futures = []
+                            
+                        # Update progress
+                        progress = (frame_count / total_frames) * 100
+                        await self.session_manager.update_session(session_id, {
+                            'progress': progress
+                        })
+
+                # Process remaining frames
+                if frame_futures:
+                    frames_data.extend(self._process_futures_batch(frame_futures))
+
+            cap.release()
+
+            # Update session with completion status
+            await self.session_manager.update_session(session_id, {
+                'status': 'completed',
+                'progress': 100
+            })
+
+            # Log successful completion
+            self.logger.info(
+                f"Video processing completed successfully - {len(frames_data)} frames processed"
+            )
+
+            return {
+                'frames_processed': len(frames_data),
+                'frames_data': frames_data,
+                'video_metadata': {
                     'fps': fps,
-                    'status': 'processing'
-                })
-
-                frames_data = []
-                with concurrent.futures.ThreadPoolExecutor(max_workers=self.config.max_workers) as executor:
-                    frame_futures = []
-                    frame_count = 0
-
-                    while True:
-                        ret, frame = cap.read()
-                        if not ret:
-                            break
-
-                        with sentry_sdk.start_span(op="frame_processing", description=f"Process frame {frame_count}"):
-                            future = executor.submit(self._process_frame, frame, frame_count)
-                            frame_futures.append(future)
-                            frame_count += 1
-
-                        # Process results in batches
-                        if len(frame_futures) >= self.config.batch_size:
-                            with sentry_sdk.start_span(op="batch_processing", description=f"Process batch of {len(frame_futures)} frames"):
-                                frames_data.extend(self._process_futures_batch(frame_futures))
-                                frame_futures = []
-                                
-                                # Update progress
-                                progress = (frame_count / total_frames) * 100
-                                await self.session_manager.update_session(session_id, {
-                                    'progress': progress
-                                })
-
-                    # Process remaining frames
-                    if frame_futures:
-                        with sentry_sdk.start_span(op="final_batch_processing", description=f"Process final batch of {len(frame_futures)} frames"):
-                            frames_data.extend(self._process_futures_batch(frame_futures))
-
-                cap.release()
-
-                # Update session with completion status
-                await self.session_manager.update_session(session_id, {
-                    'status': 'completed',
-                    'progress': 100
-                })
-
-                # Log successful completion
-                sentry_sdk.capture_message(
-                    f"Video processing completed successfully - {len(frames_data)} frames processed",
-                    level="info"
-                )
-
-                return {
-                    'frames_processed': len(frames_data),
-                    'frames_data': frames_data,
-                    'video_metadata': {
-                        'fps': fps,
-                        'total_frames': total_frames
-                    }
+                    'total_frames': total_frames
                 }
+            }
 
-            except Exception as e:
-                # Capture video processing errors with full context
-                capture_exception(e)
-                set_context("video_processing_error", {
-                    "video_path": video_path,
-                    "session_id": session_id,
-                    "error_type": type(e).__name__,
-                    "frames_processed": len(frames_data) if 'frames_data' in locals() else 0
-                })
-                
-                await self.session_manager.update_session(session_id, {
-                    'status': 'error',
-                    'error': str(e)
-                })
-                
-                self.logger.error(f"Video processing failed for session {session_id}: {str(e)}")
-                raise VideoProcessingError(f"Video processing failed: {str(e)}")
+        except Exception as e:
+            # REMOVED: capture_exception, set_context calls
+            self.logger.error(f"Video processing failed for session {session_id}: {str(e)}")
+            raise VideoProcessingError(f"Video processing failed: {str(e)}")
 
     def _process_frame(self, frame: np.ndarray, frame_number: int) -> Dict:
         """Process a single frame with face detection and analysis."""
@@ -214,7 +179,7 @@ class VideoProcessor:
             parallel_error_handler.start_session(session_id)
             credit_manager.start_session(session_id)
             
-            logger.info(f"Starting enhanced video processing pipeline for session {session_id}")
+            self.logger.info(f"Starting enhanced video processing pipeline for session {session_id}")
             
             # Define all parallel operations
             operations = []
@@ -355,12 +320,12 @@ class VideoProcessor:
                 'session_id': session_id
             }
             
-            logger.info(f"✅ Enhanced video processing pipeline completed successfully for session {session_id}")
+            self.logger.info(f"✅ Enhanced video processing pipeline completed successfully for session {session_id}")
             return result
             
         except CreditExhaustionError as e:
             error_message = f"Processing stopped due to credit exhaustion: {str(e)}"
-            logger.error(error_message)
+            self.logger.error(error_message)
             
             if websocket_manager:
                 await websocket_manager.send_error(session_id, error_message)
@@ -374,7 +339,7 @@ class VideoProcessor:
             
         except Exception as e:
             error_message = f"Enhanced pipeline processing failed: {str(e)}"
-            logger.error(error_message)
+            self.logger.error(error_message)
             
             if websocket_manager:
                 await websocket_manager.send_error(session_id, error_message)

@@ -2,23 +2,42 @@ from typing import Optional, Dict, Any
 import yt_dlp
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from youtube_transcript_api import YouTubeTranscriptApi
+from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptFound, VideoUnavailable
 import logging
 import re
 from datetime import datetime
 from core.config import settings
 from core.exceptions import VideoNotFoundError, TranscriptNotFoundError
+import requests
 
 logger = logging.getLogger(__name__)
 
 class YouTubeService:
     def __init__(self):
         self.api_key = settings.youtube_api_key
-        self.youtube = build('youtube', 'v3', developerKey=self.api_key)
+        self._youtube_client = None  # Lazy initialization
         self.ydl_opts = {
             'quiet': True,
             'no_warnings': True,
             'extract_flat': True
         }
+
+    @property
+    def youtube(self):
+        """Lazy initialization of YouTube API client - only when needed and if API key is available."""
+        if self._youtube_client is None:
+            if not self.api_key:
+                raise ValueError("YouTube API key not configured - cannot use YouTube Data API features")
+            
+            try:
+                self._youtube_client = build('youtube', 'v3', developerKey=self.api_key)
+                logger.info("✅ YouTube Data API client initialized successfully")
+            except Exception as e:
+                logger.error(f"❌ Failed to initialize YouTube Data API client: {str(e)}")
+                raise
+        
+        return self._youtube_client
 
     def extract_video_id(self, url: str) -> str:
         """Extract video ID from various YouTube URL formats."""
@@ -36,7 +55,17 @@ class YouTubeService:
         raise ValueError("Invalid YouTube URL format")
 
     async def get_video_info(self, video_id: str) -> Dict[str, Any]:
-        """Get video metadata using YouTube Data API."""
+        """Get video metadata using YouTube Data API - requires API key."""
+        if not self.api_key:
+            logger.warning("⚠️ YouTube API key not configured - returning minimal video info")
+            return {
+                'title': f"Video {video_id}",
+                'description': "API key required for full video information",
+                'duration': "Unknown",
+                'view_count': "Unknown",
+                'published_at': "Unknown"
+            }
+        
         try:
             request = self.youtube.videos().list(
                 part="snippet,contentDetails,statistics",
@@ -60,42 +89,107 @@ class YouTubeService:
             raise
 
     async def get_transcript(self, video_id: str, language: str = 'en') -> list[dict]:
-        """Get video transcript using yt-dlp."""
+        """Get video transcript - works WITHOUT YouTube API key."""
+        
+        logger.info(f"🎯 Starting transcript extraction for video {video_id}")
+        methods_tried = []
+        
+        # Method 1: Try direct extraction first (fastest)
         try:
-            with yt_dlp.YoutubeDL(self.ydl_opts) as ydl:
-                # First try to get automatic captions
-                info = ydl.extract_info(
-                    f'https://www.youtube.com/watch?v={video_id}',
-                    download=False
-                )
-                
-                if 'automatic_captions' in info and language in info['automatic_captions']:
-                    captions = info['automatic_captions'][language]
-                elif 'subtitles' in info and language in info['subtitles']:
-                    captions = info['subtitles'][language]
-                else:
-                    raise TranscriptNotFoundError(
-                        f"No transcript found for video {video_id} in language {language}"
-                    )
-
-                # Process captions into a consistent format
-                transcript = []
-                for caption in captions:
-                    if 'text' in caption:
-                        transcript.append({
-                            'text': caption['text'],
-                            'start': caption.get('start', 0),
-                            'duration': caption.get('duration', 0)
-                        })
-
-                return transcript
-
+            logger.info(f"🌐 Method 1: Direct extraction")
+            transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=[language])
+            logger.info(f"✅ Direct method successful: {len(transcript)} transcript entries")
+            return transcript
+            
         except Exception as e:
-            logger.error(f"Transcript extraction error for video {video_id}: {str(e)}")
-            raise TranscriptNotFoundError(str(e))
+            full_error = str(e)
+            methods_tried.append(f"Direct: {full_error}")
+            logger.warning(f"⚠️ Direct method failed: {full_error}")
+
+        # Method 2: Enhanced headers with user agent spoofing
+        try:
+            logger.info(f"🎭 Method 2: Enhanced headers")
+            
+            import requests
+            session = requests.Session()
+            session.headers.update({
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate',
+                'Connection': 'keep-alive',
+                'Cache-Control': 'max-age=0'
+            })
+            
+            # Temporarily patch requests to use our session
+            original_session = requests.Session
+            requests.Session = lambda: session
+            
+            try:
+                transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=[language])
+                logger.info(f"✅ Enhanced headers successful: {len(transcript)} transcript entries")
+                return transcript
+            finally:
+                requests.Session = original_session
+            
+        except Exception as e:
+            full_error = str(e)
+            methods_tried.append(f"Enhanced headers: {full_error}")
+            logger.warning(f"⚠️ Enhanced headers failed: {full_error}")
+
+        # Method 3: Try with multiple language fallbacks
+        try:
+            logger.info(f"🌍 Method 3: Multiple language fallback")
+            
+            # Try common language codes if requested language fails
+            language_fallbacks = [language, 'en', 'en-US', 'en-GB'] 
+            unique_langs = list(dict.fromkeys(language_fallbacks))  # Remove duplicates, preserve order
+            
+            transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=unique_langs)
+            logger.info(f"✅ Language fallback successful: {len(transcript)} transcript entries")
+            return transcript
+            
+        except Exception as e:
+            full_error = str(e)
+            methods_tried.append(f"Language fallback: {full_error}")
+            logger.warning(f"⚠️ Language fallback failed: {full_error}")
+
+        # Method 4: Try Tor proxy if available (optional)
+        try:
+            logger.info(f"🔥 Method 4: Tor proxy attempt")
+            proxies = {
+                "https": "socks5://127.0.0.1:9150",
+                "http": "socks5://127.0.0.1:9150",
+            }
+            
+            transcript = YouTubeTranscriptApi.get_transcript(
+                video_id, 
+                languages=[language],
+                proxies=proxies
+            )
+            
+            logger.info(f"✅ Tor proxy successful: {len(transcript)} transcript entries")
+            return transcript
+            
+        except Exception as e:
+            full_error = str(e)
+            methods_tried.append(f"Tor proxy: {full_error}")
+            logger.warning(f"⚠️ Tor proxy failed: {full_error}")
+
+        # All methods failed
+        logger.error("🚨 ALL TRANSCRIPT EXTRACTION METHODS FAILED:")
+        for i, method_error in enumerate(methods_tried, 1):
+            logger.error(f"   Method {i}: {method_error}")
+        
+        final_error = f"All transcript extraction methods failed for video {video_id}"
+        raise TranscriptNotFoundError(final_error)
 
     def validate_video(self, video_id: str) -> bool:
-        """Validate video length and availability."""
+        """Validate video length and availability - requires API key."""
+        if not self.api_key:
+            logger.warning("⚠️ YouTube API key not configured - cannot validate video, assuming valid")
+            return True
+        
         try:
             info = self.youtube.videos().list(
                 part="contentDetails,status",
@@ -180,4 +274,4 @@ class YouTubeService:
                 'duration': current_segment['duration']
             })
 
-        return segments 
+        return segments
