@@ -57,11 +57,14 @@ class Session:
         return session
 
 class SessionManager:
-    def __init__(self):
+    def __init__(self, persist_sessions=False):  # Add parameter to control persistence
         self.sessions: Dict[str, Session] = {}
         self.cleanup_interval_minutes = 60
         self.session_timeout_minutes = 60
-        self._load_sessions()
+        self.persist_sessions = persist_sessions  # Control persistence behavior
+        
+        if self.persist_sessions:
+            self._load_sessions()
     
     async def create_session(self, session_id: str = None, initial_data: Dict[str, Any] = None) -> Session:
         """Create a new session."""
@@ -158,6 +161,8 @@ class SessionManager:
     
     def _save_sessions(self):
         """Save sessions to file."""
+        if not self.persist_sessions:
+            return  # Skip saving if persistence is disabled
         try:
             sessions_file = Path(settings.temp_dir) / "sessions.json"
             sessions_data = {
@@ -173,6 +178,8 @@ class SessionManager:
     
     def _load_sessions(self):
         """Load sessions from file."""
+        if not self.persist_sessions:
+            return  # Skip loading if persistence is disabled
         try:
             sessions_file = Path(settings.temp_dir) / "sessions.json"
             if not sessions_file.exists():
@@ -192,5 +199,5 @@ class SessionManager:
             logger.error(f"Failed to load sessions: {e}")
             self.sessions = {}
 
-# Global session manager instance
-manager = SessionManager() 
+# Global session manager instance with ephemeral sessions
+manager = SessionManager(persist_sessions=False)  # Disable persistence 
