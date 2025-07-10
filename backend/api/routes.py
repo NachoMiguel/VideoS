@@ -18,7 +18,7 @@ from core.exceptions import *
 from api.websocket import manager
 from video.processor import processor
 from video.face_detection import detector
-from services.openai import openai_service
+import services.openai as openai_module
 from services.elevenlabs import elevenlabs_service
 from services.image_search import image_search_service
 from core.credit_manager import credit_manager, CreditExhaustionError
@@ -72,6 +72,7 @@ async def extract_transcript(
     use_saved_script: bool = Form(False)
 ):
     """Extract transcript from YouTube video and optionally rewrite with AI."""
+    logger.info(f">>> EXTRACT REQUEST RECEIVED: URL={youtube_url}, default_prompt={use_default_prompt}")
     try:
         session_id = str(uuid.uuid4())
         
@@ -118,7 +119,7 @@ async def extract_transcript(
             # NORMAL MODE: Extract and process transcript
             # Initialize services
             youtube_service = YouTubeService()
-            openai_service = OpenAIService()
+            # openai_service = OpenAIService() # DELETE this line completely
             
             try:
                 # Extract video ID from URL
@@ -143,7 +144,11 @@ async def extract_transcript(
                     prompt = custom_prompt
                 
                 logger.info("Generating script with OpenAI...")
+                logger.info(f"DEBUG: About to call OpenAI service")
+                logger.info(f"DEBUG: Method exists: {hasattr(openai_module.openai_service, 'generate_script')}")
+                openai_service = openai_module.get_openai_service()
                 rewritten_script = await openai_service.generate_script(transcript, prompt)
+                logger.info(f"DEBUG: Script generated: {len(rewritten_script)} chars")
                 
                 script_data = {
                     "content": rewritten_script,
@@ -208,7 +213,7 @@ async def modify_script(request: Request):
         session = await session_manager.get_session(session_id)
         
         # Use OpenAI service for context-aware modification
-        openai_service = OpenAIService()
+        # openai_service = OpenAIService()  # Comment out - use imported global instance
         
         # Check if session is in test mode from metadata
         test_mode = session.metadata.get('test_mode', False)
@@ -226,6 +231,7 @@ async def modify_script(request: Request):
             modified_text = mock_modifications.get(action, selected_text)
         else:
             # Real API call for normal mode
+            openai_service = openai_module.get_openai_service()
             modified_text = await openai_service.modify_script_context_aware(
                 action=action,
                 selected_text=selected_text,
@@ -262,7 +268,7 @@ async def bulk_modify_script(request: Request):
         session = await session_manager.get_session(session_id)
         
         # Use OpenAI service for bulk modifications
-        openai_service = OpenAIService()
+        # openai_service = OpenAIService()  # Comment out - use imported global instance
         
         # Check if session is in test mode from metadata
         test_mode = session.metadata.get('test_mode', False)
@@ -282,6 +288,7 @@ async def bulk_modify_script(request: Request):
                 })
         else:
             # Real bulk processing
+            openai_service = openai_module.get_openai_service()
             results = await openai_service.bulk_modify_script(
                 modifications=modifications,
                 progress_callback=None  # Could add WebSocket progress here
@@ -645,7 +652,7 @@ async def process_video_pipeline(session_id: str):
             await manager.send_progress(session_id, 5, "extracting_characters", "Extracting characters from script...")
             
             if session.script and session.script.get("content"):
-                characters = await openai_service.extract_characters_from_script(session.script["content"])
+                characters = await openai_module.openai_service.extract_characters_from_script(session.script["content"])
             else:
                 characters = settings.test_known_characters  # Use centralized config
         else:
@@ -1492,3 +1499,9 @@ async def get_processing_summary(session_id: str):
             status_code=500,
             detail=f"Failed to get processing summary: {str(e)}"
         ) 
+
+@router.get("/test")
+async def test_route():
+    """Simple test route."""
+    logger.info("Test route called successfully!")
+    return {"status": "working", "message": "Backend is responsive"}

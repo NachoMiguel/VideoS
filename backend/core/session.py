@@ -7,6 +7,8 @@ from pathlib import Path
 from core.config import settings
 from core.logger import logger
 from core.exceptions import SessionNotFoundError, SessionExpiredError
+import aiofiles
+import asyncio
 
 class Session:
     def __init__(self, session_id: str):
@@ -82,7 +84,7 @@ class SessionManager:
                     session.metadata[key] = value
         
         self.sessions[session_id] = session
-        self._save_sessions()
+        await self._save_sessions()
         logger.info(f"Created session {session_id}")
         return session
     
@@ -97,7 +99,7 @@ class SessionManager:
             raise SessionExpiredError(f"Session {session_id} has expired")
         
         session.update_activity()
-        self._save_sessions()
+        await self._save_sessions()
         return session
     
     async def update_session(self, session_id: str, **updates) -> Session:
@@ -111,7 +113,7 @@ class SessionManager:
                 session.metadata[key] = value
         
         session.update_activity()
-        self._save_sessions()
+        await self._save_sessions()
         logger.debug(f"Updated session {session_id}: {list(updates.keys())}")
         return session
     
@@ -122,27 +124,27 @@ class SessionManager:
         
         session = self.sessions[session_id]
         
-        # Clean up output file
+        # Clean up output file (run in thread pool)
         if session.output_file and Path(session.output_file).exists():
             try:
-                Path(session.output_file).unlink()
+                await asyncio.to_thread(Path(session.output_file).unlink)
                 logger.info(f"Cleaned up output file: {session.output_file}")
             except Exception as e:
                 logger.error(f"Failed to delete output file: {e}")
         
-        # Clean up any temp files associated with session
+        # Clean up temp directory (run in thread pool)
         temp_dir = Path(settings.temp_dir) / session_id
         if temp_dir.exists():
             try:
                 import shutil
-                shutil.rmtree(temp_dir)
+                await asyncio.to_thread(shutil.rmtree, temp_dir)
                 logger.info(f"Cleaned up session temp directory: {temp_dir}")
             except Exception as e:
                 logger.error(f"Failed to delete session temp directory: {e}")
         
         # Remove session
         del self.sessions[session_id]
-        self._save_sessions()
+        await self._save_sessions()  # Make this async call
         logger.info(f"Cleaned up session {session_id}")
     
     async def cleanup_expired_sessions(self):
@@ -159,8 +161,8 @@ class SessionManager:
         if expired_sessions:
             logger.info(f"Cleaned up {len(expired_sessions)} expired sessions")
     
-    def _save_sessions(self):
-        """Save sessions to file."""
+    async def _save_sessions(self):
+        """Save sessions to file asynchronously."""
         if not self.persist_sessions:
             return  # Skip saving if persistence is disabled
         try:
@@ -170,8 +172,9 @@ class SessionManager:
                 for session_id, session in self.sessions.items()
             }
             
-            with open(sessions_file, 'w') as f:
-                json.dump(sessions_data, f, indent=2)
+            # Use async file writing
+            async with aiofiles.open(sessions_file, 'w') as f:
+                await f.write(json.dumps(sessions_data, indent=2))
                 
         except Exception as e:
             logger.error(f"Failed to save sessions: {e}")

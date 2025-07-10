@@ -300,6 +300,32 @@ class CreditManager:
         
         logger.info(f"Saved credit usage log to {log_file}")
 
+    def reactivate_account(self, service: ServiceType, account_id: str) -> bool:
+        """Manually reactivate a deactivated account."""
+        account = self._get_account_by_id(service, account_id)
+        if account:
+            account.is_active = True
+            account.failure_count = 0
+            account.last_failure = None
+            logger.info(f"Reactivated account: {account_id}")
+            return True
+        else:
+            logger.error(f"Account not found: {account_id}")
+            return False
+
+    def reactivate_all_accounts(self, service: ServiceType):
+        """Reactivate all accounts for a service."""
+        reactivated = 0
+        for account in self.accounts.get(service, []):
+            if not account.is_active:
+                account.is_active = True
+                account.failure_count = 0
+                account.last_failure = None
+                reactivated += 1
+        
+        logger.info(f"Reactivated {reactivated} accounts for {service.value}")
+        return reactivated
+
 # Global credit manager instance
 credit_manager = CreditManager()
 

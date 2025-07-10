@@ -14,18 +14,19 @@ from core.exceptions import AIGenerationError, APIError, APILimitError, OpenAIEr
 from core.parallel import parallel_processor, parallel_task
 from core.credit_manager import credit_manager, ServiceType
 from core.parallel_error_handler import OperationType
+from core.logger import logger
 
-logger = logging.getLogger(__name__)
+# logger = logging.getLogger(__name__)  # COMMENTED OUT - using core.logger instead
 
 class OpenAIService:
     """Enhanced OpenAI service with parallel processing and context-aware script modifications."""
     
     def __init__(self):
         # Initialize basic configuration
-        self.model = "gpt-3.5-turbo"
-        self.max_tokens = 4000
+        self.model = "gpt-4o"  # Latest and most creative
+        self.max_tokens = 8000  # GPT-4o supports much higher limits
         self.temperature = 0.7
-        self.timeout = 30.0
+        self.timeout = 60.0  # INCREASED from 30.0 for longer responses
         
         # Initialize OpenAI client using credit manager
         try:
@@ -168,12 +169,29 @@ Provide only the connecting text (can be empty if contexts connect naturally).
     async def generate_script(self, transcript: str, custom_prompt: Optional[str] = None) -> str:
         """Generate a new script from the transcript using the default or custom prompt."""
         try:
+            # Check if transcript is too large for single processing
+            if len(transcript) > 60000:  # >60k characters (≈15k tokens)
+                logger.info(f"Large transcript detected ({len(transcript)} chars), using chunking approach")
+                return await self._chunk_and_process_transcript(transcript, custom_prompt)
+            
+            # Normal processing for smaller transcripts
             if custom_prompt:
                 prompt = custom_prompt.format(transcript=transcript)
             else:
                 prompt_template = self.prompts.get('basic_youtube_content_analysis', 
                                                     self._get_default_prompts()['basic_youtube_content_analysis'])
                 prompt = prompt_template.format(transcript=transcript)
+            
+            # Calculate optimal token limit based on transcript length
+            optimal_tokens = 12000  # Fixed high value for testing
+            logger.info(f"DEBUG: Using fixed optimal_tokens: {optimal_tokens}")
+            
+            # DEBUG: Log detailed information (no emojis)
+            logger.info(f"DEBUG: Transcript length: {len(transcript)} chars")
+            logger.info(f"DEBUG: Calculated optimal_tokens: {optimal_tokens}")
+            logger.info(f"DEBUG: Model: {self.model}")
+            logger.info(f"DEBUG: Max tokens setting: {self.max_tokens}")
+            logger.info(f"DEBUG: Prompt contains 20k-30k instruction: {'20,000-30,000' in prompt}")
             
             # Get account and make API call
             account = credit_manager.get_available_account(ServiceType.OPENAI)
@@ -185,11 +203,25 @@ Provide only the connecting text (can be empty if contexts connect naturally).
                     {"role": "user", "content": prompt}
                 ],
                 temperature=self.temperature,
-                max_tokens=self.max_tokens,
+                max_tokens=optimal_tokens,
                 timeout=self.timeout
             )
 
             result = response.choices[0].message.content.strip()
+            
+            # DEBUG: Log response details
+            logger.info(f"DEBUG: finish_reason: {response.choices[0].finish_reason}")
+            logger.info(f"DEBUG: Response length: {len(result)} characters")
+            logger.info(f"DEBUG: Prompt tokens used: {response.usage.prompt_tokens if hasattr(response, 'usage') else 'unknown'}")
+            logger.info(f"DEBUG: Completion tokens used: {response.usage.completion_tokens if hasattr(response, 'usage') else 'unknown'}")
+            
+            # Check if response was truncated
+            if response.choices[0].finish_reason == "length":
+                logger.warning(f"OpenAI response truncated at {optimal_tokens} tokens. Script may be incomplete.")
+            elif response.choices[0].finish_reason == "stop":
+                logger.info(f"OpenAI response completed naturally (not truncated)")
+            
+            logger.info(f"Generated script: {len(result)} characters from {len(transcript)} character transcript")
 
             # After successful OpenAI API call
             await credit_manager.record_usage(
@@ -199,18 +231,90 @@ Provide only the connecting text (can be empty if contexts connect naturally).
                 0.01,  # Cost estimate
                 success=True
             )
-            
+
             return result
 
-        except openai.APIError as e:
-            # Removed Sentry calls
-            logger.error(f"OpenAI API error: {str(e)}")
-            raise OpenAIError(f"OpenAI API error: {str(e)}")
-            
         except Exception as e:
-            # Removed Sentry calls
-            logger.error(f"Script generation error: {str(e)}")
+            logger.error(f"Error generating script: {str(e)}")
+            # Record failed usage
+            try:
+                account = credit_manager.get_available_account(ServiceType.OPENAI)
+                await credit_manager.record_usage(
+                    ServiceType.OPENAI,
+                    account.account_id,
+                    "script_generation",
+                    0.01,
+                    success=False
+                )
+            except:
+                pass
             raise AIGenerationError(f"Failed to generate script: {str(e)}")
+    
+    async def _chunk_and_process_transcript(self, transcript: str, custom_prompt: Optional[str] = None) -> str:
+        """Process very large transcripts by chunking them."""
+        MAX_CHUNK_SIZE = 12000  # Characters per chunk (≈3000 tokens)
+        
+        # Split transcript into chunks
+        chunks = []
+        words = transcript.split()
+        current_chunk = []
+        current_length = 0
+        
+        for word in words:
+            word_length = len(word) + 1  # +1 for space
+            if current_length + word_length > MAX_CHUNK_SIZE and current_chunk:
+                chunks.append(' '.join(current_chunk))
+                current_chunk = [word]
+                current_length = word_length
+            else:
+                current_chunk.append(word)
+                current_length += word_length
+        
+        if current_chunk:
+            chunks.append(' '.join(current_chunk))
+        
+        logger.info(f"Split transcript into {len(chunks)} chunks for processing")
+        
+        # Process each chunk
+        chunk_results = []
+        for i, chunk in enumerate(chunks):
+            logger.info(f"Processing chunk {i+1}/{len(chunks)}")
+            
+            # Use a simpler prompt for chunks
+            chunk_prompt = f"""
+            Rewrite this part of a YouTube transcript into an engaging script segment.
+            Make it conversational and compelling while preserving all key information.
+            
+            Transcript part {i+1}/{len(chunks)}:
+            {chunk}
+            
+            Rewritten script segment:
+            """
+            
+            account = credit_manager.get_available_account(ServiceType.OPENAI)
+            
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "You are an expert script writer. Rewrite transcript segments into engaging scripts."},
+                    {"role": "user", "content": chunk_prompt}
+                ],
+                temperature=self.temperature,
+                max_tokens=3000,  # Safe limit for chunks
+                timeout=self.timeout
+            )
+            
+            chunk_result = response.choices[0].message.content.strip()
+            chunk_results.append(chunk_result)
+            
+            # Small delay between chunks to avoid rate limits
+            await asyncio.sleep(1)
+        
+        # Combine all chunk results
+        final_script = "\n\n".join(chunk_results)
+        
+        logger.info(f"Combined {len(chunks)} chunks into final script: {len(final_script)} characters")
+        return final_script
     
     @parallel_task('api_call')
     async def modify_script_context_aware(
@@ -607,5 +711,46 @@ Provide only the connecting text (can be empty if contexts connect naturally).
             logger.error(f"Basic segment creation error: {str(e)}")
             return [{"text": script_text[:500], "characters": [], "actions": [], "tone": "neutral", "duration_estimate": 30}]
 
-# Global service instance
-openai_service = OpenAIService() 
+    def _calculate_optimal_tokens(self, transcript: str) -> int:
+        """Calculate optimal max_tokens based on transcript length and GPT-4o limits."""
+        # Rough estimation: 1 token ≈ 4 characters
+        input_tokens = len(transcript) // 4
+        
+        # GPT-4o limits: 16,384 completion tokens max, 128,000 total context
+        MAX_COMPLETION_TOKENS = 16000  # Conservative (16,384 - buffer)
+        MAX_CONTEXT_TOKENS = 125000    # Conservative (128,000 - buffer)
+        
+        # Estimate prompt tokens (system message + user prompt template)
+        prompt_overhead = 800  # Larger prompt from prompts.md
+        available_context = MAX_CONTEXT_TOKENS - prompt_overhead
+        
+        if input_tokens > available_context:
+            # Transcript too long - will need chunking (unlikely with 125k context)
+            logger.warning(f"Transcript ({input_tokens} tokens) exceeds context limit ({available_context}). Consider chunking.")
+            optimal_tokens = MAX_COMPLETION_TOKENS
+        else:
+            # For 20,000-30,000 character target (5,000-7,500 tokens)
+            target_chars = 25000  # Middle of 20k-30k range
+            target_tokens = target_chars // 4  # 6,250 tokens
+            
+            optimal_tokens = min(target_tokens, MAX_COMPLETION_TOKENS)
+            optimal_tokens = max(2000, optimal_tokens)  # Minimum 2000 tokens
+        
+        logger.info(f"Calculated optimal tokens: {optimal_tokens} for transcript length: {len(transcript)} chars ({input_tokens} tokens)")
+        return optimal_tokens
+
+# REMOVE OR COMMENT OUT the global instance line:
+# openai_service = OpenAIService()
+
+# REPLACE with lazy initialization function:
+_openai_service_instance = None
+
+def get_openai_service():
+    """Get or create OpenAI service instance (lazy initialization)"""
+    global _openai_service_instance
+    if _openai_service_instance is None:
+        _openai_service_instance = OpenAIService()
+    return _openai_service_instance
+
+# Alias for backward compatibility
+openai_service = property(lambda self: get_openai_service()) 

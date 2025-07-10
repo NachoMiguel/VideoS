@@ -276,7 +276,7 @@ class YouTubeService:
             raise TranscriptNotFoundError(f"Transcript extraction failed: {str(e)}")
         finally:
             requests.Session = original_session
-            
+        
     async def get_transcript_hybrid_free(self, video_id: str, language: str = 'en') -> list[dict]:
         """Hybrid approach: yt-dlp validation + youtube-transcript-api extraction."""
         import yt_dlp

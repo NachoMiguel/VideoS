@@ -88,7 +88,9 @@ class Settings(BaseSettings):
     
     # Default Prompts
     default_script_rewrite_prompt: str = """
-    I need you to transform this YouTube transcript into a high-retention, engaging script that keeps viewers hooked from start to finish. Here's my specific approach:
+CRITICAL REQUIREMENT: Your final script must be 20,000-30,000 characters long. This is mandatory.
+
+I need you to transform this YouTube transcript into a high-retention, engaging script that keeps viewers hooked from start to finish. Here's my specific approach:
 
 CONTENT TRANSFORMATION GOALS:
 1. Create a flowing narrative that feels like a compelling story, not a transcript summary
@@ -105,11 +107,10 @@ ENGAGEMENT TECHNIQUES TO INCLUDE:
 - Include strategic pauses and emphasis points for dramatic effect
 
 STRUCTURE REQUIREMENTS:
-- Strong opening that sets up the entire narrative
-- Progressive revelation of information that builds engagement
-- Multiple "mini-climaxes" throughout to maintain attention
-- Satisfying conclusion that ties everything together
-- No section breaks, headers, or bullet points - pure flowing narrative
+-Introduction: Open with a bold statement or question that immediately pulls viewers in without giving away too much.
+-Sections: Break the story into 6-8 sections, each adding new information and keeping the pace fast. Avoid starting each chapter with a repeated intro or reference to the title—just dive straight into the new information.
+-Conclusion: Summarize the video’s main points with a thought-provoking or surprising note, encouraging viewers to think about the topic beyond the video.
+-Format: Write the script in paragraph form with no “movie director” language. Avoid phrases like “[Cut to shot of…]” or stage directions, and write as though it’s a story told in a straightforward, engaging way
 
 TONE AND STYLE:
 - Conversational and engaging, like telling a story to a friend
@@ -117,12 +118,29 @@ TONE AND STYLE:
 - Authentic and relatable, avoiding robotic or formulaic language
 - Dynamic pacing that speeds up and slows down for dramatic effect
 
+TOPICS AND THEMES
+-Focus on controversial, shocking, or unknown elements of the subject’s life or career.
+-Incorporate recent rumors, controversies, and speculations whenever possible to keep content fresh.
+-Highlight the subject’s challenges, untold stories, or conflicts that viewers may not know.
+
+PHRASING, DRAMATIC LANGUAGE, AND CENSORSHIP
+-Use powerful, engaging language, like “shocking,” “exposed,” or “revealed,” to hold the viewer’s attention.
+-Censor or reword sensitive topics to ensure compliance with YouTube’s guidelines:
+-Avoid direct language for terms like “suicide,” “overdose,” or “criminal accusations.”
+-Use indirect phrasing (e.g., “off’d himself” for “suicide,” “O.D’d” for “overdose,” “accusations surfaced” for legal issues).
+-Ensure any profanity is censored, e.g., “dmn” or “sht.”
+-Don’t repeat introductions or start each section with references to the title—just get straight to the point.
+
+CARIED WORDING FOR KEY PHRASES
+-Avoid overusing specific phrases or descriptions (e.g., “shocking truth” or “exposed”). Instead, vary the language to keep the script fresh and engaging.
+-This ensures the script flows naturally and avoids a formulaic tone.
+
+
 Transform the following transcript into this type of engaging, complete script:
 
-Transcript:
 {transcript}
 
-Provide only the final script - no explanations, no structure notes, just the complete flowing narrative ready to use.
+Write the complete narrative script now:
 """
     
     # Parallel Processing Settings

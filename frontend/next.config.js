@@ -11,6 +11,14 @@ const nextConfig = {
         destination: 'http://localhost:8000/ws',
       },
     ]
+  },
+  // ADD THESE TIMEOUT CONFIGURATIONS:
+  experimental: {
+    proxyTimeout: 180000, // 3 minutes in milliseconds
+  },
+  serverRuntimeConfig: {
+    // Server-side timeout settings
+    timeout: 180000
   }
 }
 

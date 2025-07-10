@@ -32,6 +32,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ADD this middleware at the top to see if requests are reaching the server:
+
+@app.middleware("http")
+async def log_requests(request, call_next):
+    logger.info(f">>> REQUEST: {request.method} {request.url}")
+    response = await call_next(request)
+    logger.info(f"<<< RESPONSE: {response.status_code}")
+    return response
+
 # Include API routes
 app.include_router(api_router, prefix=settings.API_V1_STR)
 app.include_router(video_router, prefix="/api/video")
@@ -41,12 +50,14 @@ app.include_router(websocket_router, prefix="/api/video")
 @app.on_event("startup")
 async def startup_event():
     """Start background tasks on application startup."""
-    await startup_background_tasks()
+    # await startup_background_tasks()  # COMMENT THIS OUT TEMPORARILY
+    logger.info("Startup event completed (background tasks disabled for testing)")
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Stop background tasks on application shutdown."""
-    await shutdown_background_tasks()
+    # await shutdown_background_tasks()  # COMMENT THIS OUT TOO
+    pass
 
 # Static file serving for uploads/downloads
 if os.path.exists(settings.output_dir):
@@ -70,24 +81,30 @@ async def custom_exception_handler(request, exc: AIVideoSlicerException):
 @app.exception_handler(Exception)
 async def general_exception_handler(request, exc: Exception):
     logger.error(f"Unexpected error: {str(exc)}")
+    logger.error(f"Error type: {type(exc).__name__}")
+    import traceback
+    logger.error(f"Full traceback: {traceback.format_exc()}")
     
     return JSONResponse(
         status_code=500,
         content={
             "error": True,
-            "message": "An unexpected error occurred. Please try again.",
-            "type": "InternalServerError"
+            "message": f"Server error: {str(exc)}",
+            "type": type(exc).__name__,
+            "detail": str(exc)
         }
     )
 
 # Health check endpoint
 @app.get("/health")
 async def health_check():
+    logger.info("Health check called!")
     return {
-        "status": "healthy",
+        "status": "MODIFIED_WORKING",  # Changed from "healthy"
         "service": settings.PROJECT_NAME,
-        "version": "1.0.0",
-        "test_mode": settings.test_mode_enabled
+        "version": "1.0.0", 
+        "test_mode": settings.test_mode_enabled,
+        "timestamp": "2025-07-10-WORKING"  # Add this line
     }
 
 # Root endpoint
