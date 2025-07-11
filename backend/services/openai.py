@@ -167,7 +167,7 @@ Provide only the connecting text (can be empty if contexts connect naturally).
         wait=wait_exponential(multiplier=1, min=4, max=10)
     )
     async def generate_script(self, transcript: str, custom_prompt: Optional[str] = None) -> str:
-        """Generate a new script from the transcript using the default or custom prompt."""
+        """Generate a new script from the transcript with automatic continuation for length."""
         try:
             # Check if transcript is too large for single processing
             if len(transcript) > 60000:  # >60k characters (≈15k tokens)
@@ -183,8 +183,7 @@ Provide only the connecting text (can be empty if contexts connect naturally).
                 prompt = prompt_template.format(transcript=transcript)
             
             # Calculate optimal token limit based on transcript length
-            optimal_tokens = 12000  # Fixed high value for testing
-            logger.info(f"DEBUG: Using fixed optimal_tokens: {optimal_tokens}")
+            optimal_tokens = self._calculate_optimal_tokens(transcript)
             
             # DEBUG: Log detailed information (no emojis)
             logger.info(f"DEBUG: Transcript length: {len(transcript)} chars")
@@ -193,37 +192,13 @@ Provide only the connecting text (can be empty if contexts connect naturally).
             logger.info(f"DEBUG: Max tokens setting: {self.max_tokens}")
             logger.info(f"DEBUG: Prompt contains 20k-30k instruction: {'20,000-30,000' in prompt}")
             
-            # Get account and make API call
-            account = credit_manager.get_available_account(ServiceType.OPENAI)
-
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "You are an expert video script writer specializing in creating engaging content for video assembly."},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=self.temperature,
-                max_tokens=optimal_tokens,
-                timeout=self.timeout
-            )
-
-            result = response.choices[0].message.content.strip()
-            
-            # DEBUG: Log response details
-            logger.info(f"DEBUG: finish_reason: {response.choices[0].finish_reason}")
-            logger.info(f"DEBUG: Response length: {len(result)} characters")
-            logger.info(f"DEBUG: Prompt tokens used: {response.usage.prompt_tokens if hasattr(response, 'usage') else 'unknown'}")
-            logger.info(f"DEBUG: Completion tokens used: {response.usage.completion_tokens if hasattr(response, 'usage') else 'unknown'}")
-            
-            # Check if response was truncated
-            if response.choices[0].finish_reason == "length":
-                logger.warning(f"OpenAI response truncated at {optimal_tokens} tokens. Script may be incomplete.")
-            elif response.choices[0].finish_reason == "stop":
-                logger.info(f"OpenAI response completed naturally (not truncated)")
+            # ENHANCED: Generate initial script with continuation logic
+            result = await self._generate_with_continuation(prompt, optimal_tokens, target_length=25000)
             
             logger.info(f"Generated script: {len(result)} characters from {len(transcript)} character transcript")
 
-            # After successful OpenAI API call
+            # Record successful usage
+            account = credit_manager.get_available_account(ServiceType.OPENAI)
             await credit_manager.record_usage(
                 ServiceType.OPENAI,
                 account.account_id,
@@ -249,6 +224,87 @@ Provide only the connecting text (can be empty if contexts connect naturally).
             except:
                 pass
             raise AIGenerationError(f"Failed to generate script: {str(e)}")
+
+    async def _generate_with_continuation(self, initial_prompt: str, max_tokens: int, target_length: int = 25000) -> str:
+        """Generate script with automatic continuation until target length is reached."""
+        MIN_LENGTH = 20000  # Minimum acceptable length
+        MAX_CONTINUATIONS = 3  # Prevent infinite loops
+        
+        # Step 1: Generate initial script
+        account = credit_manager.get_available_account(ServiceType.OPENAI)
+        
+        response = await self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": "You are an expert video script writer specializing in creating engaging content for video assembly."},
+                {"role": "user", "content": initial_prompt}
+            ],
+            temperature=self.temperature,
+            max_tokens=max_tokens,
+            timeout=self.timeout
+        )
+
+        current_script = response.choices[0].message.content.strip()
+        
+        # DEBUG: Log initial response
+        logger.info(f"DEBUG: Initial generation - finish_reason: {response.choices[0].finish_reason}")
+        logger.info(f"DEBUG: Initial length: {len(current_script)} characters")
+        logger.info(f"DEBUG: Initial tokens used: {response.usage.completion_tokens if hasattr(response, 'usage') else 'unknown'}")
+        
+        # Step 2: Continue if script is too short
+        continuation_count = 0
+        
+        while len(current_script) < MIN_LENGTH and continuation_count < MAX_CONTINUATIONS:
+            continuation_count += 1
+            remaining_chars = target_length - len(current_script)
+            
+            logger.info(f"Script too short ({len(current_script)} chars). Continuation {continuation_count}/{MAX_CONTINUATIONS}")
+            
+            # Create continuation prompt
+            continuation_prompt = f"""CONTINUE this script to reach the target length of {target_length} characters.
+
+Current script length: {len(current_script)} characters
+Needed: {remaining_chars} more characters
+
+The script below is incomplete. Continue writing from where it left off, maintaining the same tone and style. Add more detailed explanations, background information, examples, and expand on the existing content. Keep the narrative flowing naturally.
+
+Current script:
+{current_script}
+
+CONTINUE writing more content to reach {target_length} characters total:"""
+
+            # Generate continuation
+            continuation_response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "You are continuing a script. Write additional content that flows naturally from the existing script."},
+                    {"role": "user", "content": continuation_prompt}
+                ],
+                temperature=self.temperature,
+                max_tokens=min(max_tokens, 8000),  # Limit continuation tokens
+                timeout=self.timeout
+            )
+            
+            continuation_text = continuation_response.choices[0].message.content.strip()
+            
+            # Append continuation (add spacing if needed)
+            if not current_script.endswith(('\n', ' ')):
+                current_script += '\n\n'
+            current_script += continuation_text
+            
+            logger.info(f"DEBUG: Continuation {continuation_count} - Added {len(continuation_text)} chars")
+            logger.info(f"DEBUG: Total length now: {len(current_script)} characters")
+            
+            # Small delay to avoid rate limits
+            await asyncio.sleep(1)
+        
+        # Final result
+        if len(current_script) >= MIN_LENGTH:
+            logger.info(f"SUCCESS: Reached target length {len(current_script)} characters after {continuation_count} continuations")
+        else:
+            logger.warning(f"WARNING: Script still short at {len(current_script)} characters after {MAX_CONTINUATIONS} continuations")
+        
+        return current_script
     
     async def _chunk_and_process_transcript(self, transcript: str, custom_prompt: Optional[str] = None) -> str:
         """Process very large transcripts by chunking them."""
@@ -730,8 +786,8 @@ Provide only the connecting text (can be empty if contexts connect naturally).
             optimal_tokens = MAX_COMPLETION_TOKENS
         else:
             # For 20,000-30,000 character target (5,000-7,500 tokens)
-            target_chars = 25000  # Middle of 20k-30k range
-            target_tokens = target_chars // 4  # 6,250 tokens
+            target_chars = 30000  # Upper end of range for longer output
+            target_tokens = target_chars // 4  # 7,500 tokens
             
             optimal_tokens = min(target_tokens, MAX_COMPLETION_TOKENS)
             optimal_tokens = max(2000, optimal_tokens)  # Minimum 2000 tokens
@@ -752,5 +808,9 @@ def get_openai_service():
         _openai_service_instance = OpenAIService()
     return _openai_service_instance
 
-# Alias for backward compatibility
-openai_service = property(lambda self: get_openai_service()) 
+# For backward compatibility, create a lazy property-like object
+class LazyOpenAIService:
+    def __getattr__(self, name):
+        return getattr(get_openai_service(), name)
+
+openai_service = LazyOpenAIService() 
