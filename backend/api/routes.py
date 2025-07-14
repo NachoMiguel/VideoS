@@ -109,6 +109,42 @@ async def extract_transcript(
         openai_service = openai_module.get_openai_service()
         rewritten_script = await openai_service.generate_script(transcript, prompt)
         
+        # 🎯 NEW: Save the generated script to script_tests folder
+        try:
+            # Create script_tests directory if it doesn't exist
+            script_tests_dir = Path(__file__).parent.parent.parent / "script_tests"
+            script_tests_dir.mkdir(exist_ok=True)
+            
+            # Generate filename with timestamp and video info
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            safe_video_id = video_id.replace('-', '_').replace(' ', '_')[:20]
+            filename = f"generated_script_{timestamp}_{safe_video_id}.txt"
+            filepath = script_tests_dir / filename
+            
+            # Save script with metadata
+            script_content = f"""=== GENERATED SCRIPT ===
+Session ID: {session_id}
+Video ID: {video_id}
+YouTube URL: {youtube_url}
+Generated: {datetime.now().isoformat()}
+Script Length: {len(rewritten_script)} characters
+Prompt Used: {'Default' if use_default_prompt else 'Custom'}
+
+=== SCRIPT CONTENT ===
+{rewritten_script}
+
+=== END SCRIPT ===
+"""
+            
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(script_content)
+            
+            logger.info(f"✅ Script saved to: {filepath}")
+            
+        except Exception as save_error:
+            logger.warning(f"Failed to save script to script_tests folder: {str(save_error)}")
+            # Don't fail the entire request if saving fails
+        
         # Complete the session update (this might have been the issue)
         script_data = {
             "content": rewritten_script,

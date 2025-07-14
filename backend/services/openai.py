@@ -328,22 +328,21 @@ Provide only the connecting text (can be empty if contexts connect naturally).
         # Create anti-repetition continuation prompt
         continuation_prompt = f"""You are continuing a video script. Your task is to write NEW content that extends the narrative.
 
-    TARGET: Add approximately {needed_chars} characters to reach {target_length} total characters.
+TARGET: Add approximately {needed_chars} characters to reach {target_length} total characters.
 
-    CONTEXT (last few paragraphs of existing script):
-    {context}
+CONTEXT (last few paragraphs of existing script):
+{context}
 
-    CRITICAL INSTRUCTIONS:
-    1. Write ONLY new content - do NOT repeat or rephrase any part of the existing script
-    2. Continue the narrative naturally from where it left off
-    3. Expand with new details, examples, anecdotes, or perspectives
-    4. Maintain the same engaging tone and writing style
-    5. Do NOT start by restating what has already been covered
+CRITICAL INSTRUCTIONS:
+1. Write ONLY new content - do NOT repeat or rephrase any part of the existing script
+2. Continue the narrative naturally from where it left off
+3. Expand with new details, examples, anecdotes, or perspectives
+4. Maintain the same engaging tone and writing style
+5. Do NOT start by restating what has already been covered
 
-    Write the continuation now (NEW content only):"""
+Write the continuation now (NEW content only):"""
 
         # Generate continuation
-        logger.info(f"CONTINUING WITH-----> GENERATE CONTINUATION WITH OVERLAP DETECTION")
         continuation_response = await self.client.chat.completions.create(
             model=self.model,
             messages=[
@@ -366,8 +365,7 @@ Provide only the connecting text (can be empty if contexts connect naturally).
         else:
             logger.warning(f"Continuation {continuation_num}: Content too similar to existing script, skipping")
             return ""
-    logger.info(f"EXITING---->INSIDE GENERATE CONTINUATION WITH OVERLAP DETECTION")
-        
+
     def _extract_continuation_context(self, script: str, max_context_chars: int = 2000) -> str:
         """Extract the last few paragraphs as context for continuation."""
         paragraphs = script.split('\n\n')
