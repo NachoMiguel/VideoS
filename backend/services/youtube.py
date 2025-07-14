@@ -234,7 +234,6 @@ class YouTubeService:
             'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         ]
         
-        # Create session with realistic headers
         session = requests.Session()
         session.headers.update({
             'User-Agent': random.choice(user_agents),
@@ -249,7 +248,7 @@ class YouTubeService:
             'Sec-Fetch-Site': 'none',
             'Cache-Control': 'max-age=0'
         })
-        
+            
         # Add random delay to appear more human
         await asyncio.sleep(random.uniform(0.5, 2.0))
         
@@ -276,7 +275,7 @@ class YouTubeService:
             raise TranscriptNotFoundError(f"Transcript extraction failed: {str(e)}")
         finally:
             requests.Session = original_session
-        
+            
     async def get_transcript_hybrid_free(self, video_id: str, language: str = 'en') -> list[dict]:
         """Hybrid approach: yt-dlp validation + youtube-transcript-api extraction."""
         import yt_dlp
@@ -744,48 +743,97 @@ class YouTubeService:
         return min(max(final_score, 0.0), 1.0)  # Clamp between 0 and 1
 
     async def get_transcript(self, video_id: str, language: str = 'en') -> list[dict]:
-        """Enhanced transcript extraction with intelligent correction."""
+        """WORKING transcript extraction using our victory method."""
         
-        logger.info(f"🎯 Starting ENHANCED transcript extraction for video {video_id}")
+        logger.info(f"🎯 Starting WORKING transcript extraction for video {video_id}")
         
         try:
-            # Step 1: Extract video context
-            logger.info("📊 Extracting video context...")
-            context = await self.extract_video_context(video_id)
+            # Use our proven working method
+            transcript = await self.get_transcript_victory_method(video_id, language)
             
-            # Step 2: Get prioritized transcript (manual > auto)
-            logger.info("🎯 Getting prioritized transcript...")
-            transcript, transcript_type = await self.get_prioritized_transcript(video_id, language)
+            logger.info(f"🏆 WORKING TRANSCRIPT EXTRACTION COMPLETE:")
+            logger.info(f"   📊 Segments: {len(transcript)}")
             
-            # Step 3: Apply intelligent corrections
-            logger.info("🔧 Applying intelligent corrections...")
-            corrected_transcript = await self.correct_transcript_with_context(
-                transcript, context, transcript_type
-            )
-            
-            # Step 4: Calculate quality score
-            quality_score = await self.calculate_quality_score(corrected_transcript, context)
-            
-            # Step 5: Log results
-            logger.info(f"🏆 ENHANCED TRANSCRIPT EXTRACTION COMPLETE:")
-            logger.info(f"   📊 Segments: {len(corrected_transcript)}")
-            logger.info(f"   🎯 Type: {transcript_type}")
-            logger.info(f"   📈 Quality Score: {quality_score:.2f}/1.0")
-            logger.info(f"   🔧 Corrections Applied: {sum(1 for t in corrected_transcript if t.get('original_text'))}")
-            logger.info(f"   🎬 Video Context: {', '.join(context.get('topic_hints', {}).get('primary_topics', ['general']))}")
-            
-            return corrected_transcript
+            return transcript
             
         except Exception as e:
-            logger.error(f"Enhanced transcript extraction failed: {e}")
+            logger.error(f"Working transcript extraction failed: {e}")
+            raise TranscriptNotFoundError(f"All transcript extraction methods failed for {video_id}")
+
+    async def get_transcript_victory_method(self, video_id: str, language: str = 'en') -> list[dict]:
+        """Victory method - proven to work."""
+        import urllib.request
+        import json
+        import yt_dlp
+        
+        video_url = f"https://youtube.com/watch?v={video_id}"
+        
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': False,
+        }
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(video_url, download=False)
             
-            # Fallback to basic method
-            logger.info("🔄 Falling back to basic transcript extraction")
-            try:
-                return await self.get_transcript_yt_dlp_native(video_id, language)
-            except Exception as fallback_error:
-                logger.error(f"Fallback also failed: {fallback_error}")
-                raise TranscriptNotFoundError(f"All transcript extraction methods failed for {video_id}")
+            # Get subtitle URLs
+            subtitles = info.get('subtitles', {})
+            auto_captions = info.get('automatic_captions', {})
+            
+            subtitle_tracks = subtitles.get(language) or auto_captions.get(language)
+            
+            if not subtitle_tracks:
+                subtitle_tracks = subtitles.get('en') or auto_captions.get('en')
+            
+            if not subtitle_tracks:
+                raise TranscriptNotFoundError(f"No {language} subtitles found")
+            
+            # Find JSON3 format (highest quality)
+            json3_track = None
+            for track in subtitle_tracks:
+                if track.get('ext') == 'json3':
+                    json3_track = track
+                    break
+            
+            if json3_track:
+                logger.info("🎯 Using JSON3 format (highest quality)")
+                
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
+                
+                req = urllib.request.Request(json3_track['url'], headers=headers)
+                with urllib.request.urlopen(req) as response:
+                    content = response.read().decode('utf-8')
+                    data = json.loads(content)
+                    
+                    transcript = []
+                    
+                    for event in data.get('events', []):
+                        if 'segs' in event and event.get('tStartMs') is not None:
+                            text_parts = []
+                            for seg in event['segs']:
+                                if 'utf8' in seg:
+                                    text_parts.append(seg['utf8'])
+                            
+                            if text_parts:
+                                full_text = ''.join(text_parts).strip()
+                                
+                                if (full_text and 
+                                    len(full_text) > 1 and
+                                    not full_text.startswith('[♪♪♪]')):
+                                    
+                                    transcript.append({
+                                        'text': full_text,
+                                        'start': event['tStartMs'] / 1000.0,
+                                        'duration': event.get('dDurationMs', 0) / 1000.0
+                                    })
+                    
+                    logger.info(f"✅ JSON3 SUCCESS: {len(transcript)} segments extracted!")
+                    return transcript
+            
+            raise TranscriptNotFoundError("No JSON3 format available")
 
     def validate_video(self, video_id: str) -> bool:
         """Validate video length and availability - requires API key."""

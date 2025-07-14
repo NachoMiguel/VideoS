@@ -9,7 +9,8 @@ from core.config import settings
 from core.logger import logger
 from core.exceptions import AIVideoSlicerException, get_user_friendly_message
 from api.routes import router as api_router
-from api.video_routes import router as video_router
+# Temporarily disabled due to InsightFace dependency conflicts
+# from api.video_routes import router as video_router
 from api.websocket import websocket_router
 from core.background_tasks import startup_background_tasks, shutdown_background_tasks
 
@@ -43,7 +44,8 @@ async def log_requests(request, call_next):
 
 # Include API routes
 app.include_router(api_router, prefix=settings.API_V1_STR)
-app.include_router(video_router, prefix="/api/video")
+# Temporarily disabled due to InsightFace dependency conflicts
+# app.include_router(video_router, prefix="/api/video")
 app.include_router(websocket_router, prefix="/api/video")
 
 # Event handlers
