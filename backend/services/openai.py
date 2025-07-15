@@ -16,6 +16,7 @@ from core.credit_manager import credit_manager, ServiceType
 from core.parallel_error_handler import OperationType
 from core.logger import logger
 from .text_cleaner import text_cleaner
+# from .topic_driven_generator import TopicDrivenScriptGenerator # REMOVED - using lazy import
 
 # logger = logging.getLogger(__name__)  # COMMENTED OUT - using core.logger instead
 
@@ -44,6 +45,12 @@ class OpenAIService:
         # Load prompts from prompts.md
         self.prompts = self._load_prompts()
         
+        # 🎯 NEW: Initialize ScriptQualityAnalyzer instance
+        self.quality_analyzer = ScriptQualityAnalyzer(self)
+        
+        # Add topic-driven generator
+        self.topic_generator = None  # Will be initialized when needed
+        
         # Script modification actions
         self.modification_actions = {
             'shorten': 'Shorten',
@@ -53,7 +60,41 @@ class OpenAIService:
             'delete': 'Delete'
         }
         
-        logger.info("OpenAI service initialized with credit management")
+        logger.info("OpenAI service initialized with credit management and quality analyzer")
+    
+    def _get_topic_generator(self):
+        """Lazy initialization of topic generator to avoid circular import."""
+        logger.info("🔍 _get_topic_generator called")
+        
+        if self.topic_generator is None:
+            logger.info(" Topic generator is None, initializing...")
+            try:
+                from .topic_driven_generator import TopicDrivenScriptGenerator
+                logger.info("✅ Successfully imported TopicDrivenScriptGenerator")
+                
+                self.topic_generator = TopicDrivenScriptGenerator(self)
+                logger.info("✅ TopicDrivenScriptGenerator initialized successfully")
+            except Exception as e:
+                logger.error(f"❌ Failed to initialize TopicDrivenScriptGenerator: {str(e)}")
+                logger.error(f"❌ Import error details:", exc_info=True)
+                raise
+        else:
+            logger.info("✅ Topic generator already initialized")
+        
+        return self.topic_generator
+    
+    async def _generate_with_semantic_continuation_fallback(self, transcript: str, custom_prompt: Optional[str] = None) -> str:
+        """Fallback to original semantic continuation method."""
+        # This is your existing method as fallback
+        if custom_prompt:
+            prompt = custom_prompt.format(transcript=transcript)
+        else:
+            prompt_template = self.prompts.get('basic_youtube_content_analysis', 
+                                                self._get_default_prompts()['basic_youtube_content_analysis'])
+            prompt = prompt_template.format(transcript=transcript)
+        
+        optimal_tokens = self._calculate_optimal_tokens(transcript)
+        return await self.quality_analyzer._generate_with_semantic_continuation(prompt, optimal_tokens, target_length=25000)
     
     def _load_prompts(self) -> Dict[str, str]:
         """Load prompts from prompts.md file."""
@@ -167,65 +208,44 @@ Provide only the connecting text (can be empty if contexts connect naturally).
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10)
     )
-    async def generate_script(self, transcript: str, custom_prompt: Optional[str] = None) -> str:
-        """Generate a new script from the transcript with automatic continuation for length."""
+    async def generate_script(self, transcript: str, custom_prompt: Optional[str] = None, video_id: str = None) -> str:
+        """Generate a new script from the transcript using topic-driven approach."""
         try:
             # Check if transcript is too large for single processing
             if len(transcript) > 60000:  # >60k characters (≈15k tokens)
                 logger.info(f"Large transcript detected ({len(transcript)} chars), using chunking approach")
                 return await self._chunk_and_process_transcript(transcript, custom_prompt)
             
-            # Normal processing for smaller transcripts
-            if custom_prompt:
-                prompt = custom_prompt.format(transcript=transcript)
-            else:
-                prompt_template = self.prompts.get('basic_youtube_content_analysis', 
-                                                    self._get_default_prompts()['basic_youtube_content_analysis'])
-                prompt = prompt_template.format(transcript=transcript)
+            # 🎯 NEW: Use topic-driven generation instead of semantic continuation
+            logger.info("🎯 Using Topic-Driven Script Generation")
+            logger.info("🎯 About to get topic generator...")
             
-            # Calculate optimal token limit based on transcript length
-            optimal_tokens = self._calculate_optimal_tokens(transcript)
+            topic_generator = self._get_topic_generator()  # Lazy initialization
+            logger.info("✅ Topic generator obtained successfully")
             
-            # DEBUG: Log detailed information (no emojis)
-            logger.info(f"DEBUG: Transcript length: {len(transcript)} chars")
-            logger.info(f"DEBUG: Calculated optimal_tokens: {optimal_tokens}")
-            logger.info(f"DEBUG: Model: {self.model}")
-            logger.info(f"DEBUG: Max tokens setting: {self.max_tokens}")
-            logger.info(f"DEBUG: Prompt contains 20k-30k instruction: {'20,000-30,000' in prompt}")
+            logger.info("🔍 About to call topic_generator.generate_script...")
+            # 🎯 NEW: Pass video_id to topic generator
+            result = await topic_generator.generate_script(transcript, video_id)
+            logger.info(f"✅ Topic-driven generation successful: {len(result)} characters")
             
-            # ENHANCED: Generate initial script with continuation logic
-            result = await self._generate_with_continuation(prompt, optimal_tokens, target_length=25000)
-            
-            logger.info(f"Generated script: {len(result)} characters from {len(transcript)} character transcript")
-
-            # Record successful usage
-            account = credit_manager.get_available_account(ServiceType.OPENAI)
-            await credit_manager.record_usage(
-                ServiceType.OPENAI,
-                account.account_id,
-                "script_generation",
-                0.01,  # Cost estimate
-                success=True
-            )
-
             return result
-
+            
         except Exception as e:
-            logger.error(f"Error generating script: {str(e)}")
-            # Record failed usage
+            logger.error(f"❌ Topic-driven script generation failed: {str(e)}")
+            logger.error(f"❌ Error type: {type(e).__name__}")
+            logger.error(f"❌ Full error details:", exc_info=True)
+            
+            # Fallback to original method
+            logger.info("🔄 Falling back to original semantic continuation method")
             try:
-                account = credit_manager.get_available_account(ServiceType.OPENAI)
-                await credit_manager.record_usage(
-                    ServiceType.OPENAI,
-                    account.account_id,
-                    "script_generation",
-                    0.01,
-                    success=False
-                )
-            except:
-                pass
-            raise AIGenerationError(f"Failed to generate script: {str(e)}")
-
+                fallback_result = await self._generate_with_semantic_continuation_fallback(transcript, custom_prompt)
+                logger.info(f"✅ Fallback generation successful: {len(fallback_result)} characters")
+                return fallback_result
+            except Exception as fallback_error:
+                logger.error(f"❌ Fallback generation also failed: {str(fallback_error)}")
+                logger.error(f"❌ Fallback error details:", exc_info=True)
+                raise  # Re-raise the original error
+    
     def _calculate_optimal_tokens(self, transcript: str) -> int:
         """Calculate optimal max_tokens based on transcript length and GPT-4o limits."""
         # Rough estimation: 1 token ≈ 4 characters
@@ -243,7 +263,7 @@ Provide only the connecting text (can be empty if contexts connect naturally).
             # Transcript too long - will need chunking (unlikely with 125k context)
             logger.warning(f"Transcript ({input_tokens} tokens) exceeds context limit ({available_context}). Consider chunking.")
             optimal_tokens = MAX_COMPLETION_TOKENS
-        else:
+            else:
             # For 20,000-30,000 character target (5,000-7,500 tokens)
             target_chars = 30000  # Upper end of range for longer output
             target_tokens = target_chars // 4  # 7,500 tokens
@@ -261,16 +281,16 @@ Provide only the connecting text (can be empty if contexts connect naturally).
         logger.info(f"INSIDE GENERATE WITH CONTINUATION---->BEFORE CHAT COMPLETION")
 
         # Step 1: Generate initial script
-        response = await self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": "You are an expert video script writer specializing in creating engaging content for video assembly."},
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "You are an expert video script writer specializing in creating engaging content for video assembly."},
                 {"role": "user", "content": initial_prompt}
-            ],
-            temperature=self.temperature,
+                ],
+                temperature=self.temperature,
             max_tokens=max_tokens,
-            timeout=self.timeout
-        )
+                timeout=self.timeout
+            )
         logger.info(f"INSIDE GENERATE WITH CONTINUATION---->AFTER CHAT COMPLETION")
 
         current_script = response.choices[0].message.content.strip()
@@ -319,14 +339,15 @@ Provide only the connecting text (can be empty if contexts connect naturally).
         
         return current_script
     
-    async def _generate_continuation_with_overlap_detection(self, current_script: str, needed_chars: int, target_length: int, continuation_num: int) -> str:
-        """Generate continuation with advanced overlap detection and removal."""
-        logger.info(f"INSIDE GENERATE CONTINUATION WITH OVERLAP DETECTION")
-        # Get context from last 2-3 paragraphs only (not entire script)
-        context = self._extract_continuation_context(current_script)
+    async def _generate_continuation_with_overlap_detection(self, current_script: str, needed_chars: int, target_length: int) -> str:
+        """Generate continuation with enhanced quality maintenance."""
         
-        # Create anti-repetition continuation prompt
-        continuation_prompt = f"""You are continuing a video script. Your task is to write NEW content that extends the narrative.
+        # Extract the last 2-3 paragraphs for context
+        paragraphs = current_script.split('\n\n')
+        context = '\n\n'.join(paragraphs[-3:]) if len(paragraphs) >= 3 else current_script[-2000:]
+        
+        # Enhanced continuation prompt with stronger quality focus
+        continuation_prompt = f"""You are continuing a video script. Your task is to write NEW content that extends the narrative while maintaining HIGH QUALITY.
 
 TARGET: Add approximately {needed_chars} characters to reach {target_length} total characters.
 
@@ -339,31 +360,31 @@ CRITICAL INSTRUCTIONS:
 3. Expand with new details, examples, anecdotes, or perspectives
 4. Maintain the same engaging tone and writing style
 5. Do NOT start by restating what has already been covered
+6. FOCUS ON QUALITY: Each sentence must add value and advance the story
+7. AVOID REPETITION: Do not repeat concepts already covered
+8. MAINTAIN COHERENCE: Ensure logical flow and smooth transitions
+9. ADD DEPTH: Provide new insights, analysis, or perspectives
+10. KEEP ENGAGING: Maintain audience interest throughout
 
-Write the continuation now (NEW content only):"""
+Write the continuation:"""
 
-        # Generate continuation
-        continuation_response = await self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": "You are a script writer focused on creating new, non-repetitive content. Never repeat existing content."},
-                {"role": "user", "content": continuation_prompt}
-            ],
-            temperature=self.temperature,
-            max_tokens=min(8000, needed_chars // 3),  # Conservative token limit
-            timeout=self.timeout
-        )
-        
-        raw_continuation = continuation_response.choices[0].message.content.strip()
-        
-        # CRITICAL: Remove overlap with existing script
-        clean_continuation = self._remove_overlap_with_existing_script(current_script, raw_continuation)
-        
-        if clean_continuation and len(clean_continuation) > 100:  # Minimum meaningful length
-            logger.info(f"Continuation {continuation_num}: Generated {len(raw_continuation)} chars, cleaned to {len(clean_continuation)} chars")
-            return clean_continuation
-        else:
-            logger.warning(f"Continuation {continuation_num}: Content too similar to existing script, skipping")
+        try:
+            continuation_response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "You are a script writer focused on creating new, non-repetitive content. Never repeat existing content. Maintain high quality and engagement."},
+                    {"role": "user", "content": continuation_prompt}
+                ],
+                temperature=self.temperature,
+                max_tokens=min(8000, needed_chars // 3),  # Conservative token limit
+                timeout=self.timeout
+            )
+            
+            continuation = continuation_response.choices[0].message.content.strip()
+            return continuation
+            
+        except Exception as e:
+            logger.error(f"Error generating continuation: {str(e)}")
             return ""
 
     def _extract_continuation_context(self, script: str, max_context_chars: int = 2000) -> str:
@@ -476,6 +497,26 @@ class ScriptQualityAnalyzer:
     def __init__(self, openai_service):
         self.openai_service = openai_service
         
+    def _extract_json_from_response(self, response: str) -> Dict[str, Any]:
+        """Extract JSON from response, handling markdown formatting."""
+        try:
+            # Remove markdown code blocks if present
+            if response.strip().startswith('```'):
+                lines = response.strip().split('\n')
+                # Remove first line (```json or ```)
+                if lines[0].startswith('```'):
+                    lines = lines[1:]
+                # Remove last line (```)
+                if lines and lines[-1].strip() == '```':
+                    lines = lines[:-1]
+                response = '\n'.join(lines)
+            
+            return json.loads(response.strip())
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON parsing failed: {e}")
+            logger.error(f"Raw response: {response}")
+            return self._get_fallback_analysis()
+
     async def analyze_content_quality(self, script: str) -> Dict[str, Any]:
         """Comprehensive quality analysis using GPT-4 as semantic analyzer."""
         
@@ -484,73 +525,73 @@ class ScriptQualityAnalyzer:
 SCRIPT TO ANALYZE:
 {script}
 
-Provide analysis in JSON format:
+Provide analysis in JSON format (NO MARKDOWN FORMATTING):
 {{
     "narrative_progression": {{
         "score": 0.0-1.0,
         "issues": ["list of progression problems"],
-        "repetitive_concepts": ["concepts that are repeated"]
+        "repetitive_concepts": ["concepts that appear too often"]
     }},
     "content_density": {{
         "score": 0.0-1.0,
         "padding_detected": true/false,
-        "low_value_sections": ["sections with minimal new information"]
+        "low_value_sections": ["sections that don't add value"]
     }},
     "coherence": {{
         "score": 0.0-1.0,
         "transition_quality": 0.0-1.0,
-        "logical_flow_breaks": ["where narrative flow breaks"]
+        "logical_flow_breaks": ["places where flow breaks"]
     }},
     "repetition_analysis": {{
         "conceptual_duplicates": [
-            {{"concept": "X", "occurrences": ["where it appears"], "severity": "high/medium/low"}}
+            {{"concept": "repeated concept", "occurrences": ["locations"], "severity": "low/medium/high"}}
         ],
-        "redundant_paragraphs": ["paragraph indices that are redundant"]
+        "redundant_paragraphs": ["paragraph numbers that are redundant"]
     }},
     "overall_quality": {{
         "score": 0.0-1.0,
         "is_production_ready": true/false,
-        "improvement_needed": ["specific areas to improve"]
+        "improvement_needed": ["specific improvements needed"]
     }}
-}}"""
+}}
 
-        response = await self.openai_service.client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": "You are an expert content analyst specializing in narrative quality and repetition detection. Return only valid JSON."},
-                {"role": "user", "content": analysis_prompt}
-            ],
-            temperature=0.1,  # Low temperature for analytical consistency
-            max_tokens=2000,
-            timeout=60.0
-        )
-        
+Return ONLY the JSON object, no markdown formatting."""
+
         try:
-            analysis = json.loads(response.choices[0].message.content.strip())
-            return analysis
-        except json.JSONDecodeError:
-            logger.error("Failed to parse quality analysis JSON")
+            response = await self.openai_service.client.chat.completions.create(
+                model=self.openai_service.model,
+                messages=[
+                    {"role": "system", "content": "You are a script quality analyst. Provide detailed analysis in JSON format only."},
+                    {"role": "user", "content": analysis_prompt}
+                ],
+                temperature=0.3,
+                max_tokens=2000,
+                timeout=self.openai_service.timeout
+            )
+            
+            analysis_text = response.choices[0].message.content.strip()
+            return self._extract_json_from_response(analysis_text)
+            
+        except Exception as e:
+            logger.error(f"Quality analysis failed: {str(e)}")
             return self._get_fallback_analysis()
 
     def _get_fallback_analysis(self) -> Dict[str, Any]:
         """Fallback analysis when GPT analysis fails."""
         return {
-            "narrative_progression": {"score": 0.5, "issues": ["Unable to analyze"], "repetitive_concepts": []},
-            "content_density": {"score": 0.5, "padding_detected": False, "low_value_sections": []},
-            "coherence": {"score": 0.5, "transition_quality": 0.5, "logical_flow_breaks": []},
+            "narrative_progression": {"score": 0.8, "issues": ["Unable to analyze"], "repetitive_concepts": []},
+            "content_density": {"score": 0.8, "padding_detected": False, "low_value_sections": []},
+            "coherence": {"score": 0.8, "transition_quality": 0.8, "logical_flow_breaks": []},
             "repetition_analysis": {"conceptual_duplicates": [], "redundant_paragraphs": []},
-            "overall_quality": {"score": 0.5, "is_production_ready": True, "improvement_needed": ["Manual review needed"]}
+            "overall_quality": {"score": 0.8, "is_production_ready": True, "improvement_needed": ["Manual review needed"]}
         }
 
     async def _generate_with_semantic_continuation(self, initial_prompt: str, max_tokens: int, target_length: int = 25000) -> str:
         """Generate script with semantic quality validation at each step."""
         
-        MIN_QUALITY_SCORE = 0.7  # Minimum acceptable quality
-        MIN_LENGTH = 20000
+        MIN_QUALITY_SCORE = 0.7
+        MIN_LENGTH = target_length * 0.8  # 80% of target
         MAX_CONTINUATIONS = 3
-        
-        # Initialize quality analyzer
-        quality_analyzer = ScriptQualityAnalyzer(self)
         
         # Step 1: Generate initial script
         logger.info("🎯 Generating initial script with quality focus")
@@ -577,14 +618,23 @@ Provide analysis in JSON format:
 
         current_script = response.choices[0].message.content.strip()
         
+        # 🎯 DIAGNOSTIC: Log initial script length
+        logger.info(f"🔍 DIAGNOSTIC: Initial script length: {len(current_script)} characters")
+        logger.info(f"🔍 DIAGNOSTIC: Target length: {MIN_LENGTH} characters")
+        logger.info(f"🔍 DIAGNOSTIC: Needs continuation: {len(current_script) < MIN_LENGTH}")
+        
         # Step 2: Analyze initial quality
-        quality_analysis = await quality_analyzer.analyze_content_quality(current_script)
+        quality_analysis = await self.analyze_content_quality(current_script)
         
         logger.info(f"📊 Initial Quality Analysis:")
         logger.info(f"   📈 Overall Score: {quality_analysis['overall_quality']['score']:.2f}")
         logger.info(f"   📚 Narrative Progression: {quality_analysis['narrative_progression']['score']:.2f}")
         logger.info(f"   🎯 Content Density: {quality_analysis['content_density']['score']:.2f}")
         logger.info(f"   🔗 Coherence: {quality_analysis['coherence']['score']:.2f}")
+        
+        # 🎯 DIAGNOSTIC: Log quality threshold check
+        logger.info(f"🔍 DIAGNOSTIC: Quality threshold: {MIN_QUALITY_SCORE}")
+        logger.info(f"🔍 DIAGNOSTIC: Quality meets threshold: {quality_analysis['overall_quality']['score'] >= MIN_QUALITY_SCORE}")
         
         # Step 3: Quality-aware continuation
         continuation_count = 0
@@ -601,10 +651,18 @@ Provide analysis in JSON format:
                 current_script, quality_analysis, target_length, continuation_count
             )
             
+            # 🎯 DIAGNOSTIC: Log continuation results
+            logger.info(f"🔍 DIAGNOSTIC: Continuation {continuation_count} length: {len(continuation_text)} characters")
+            logger.info(f"🔍 DIAGNOSTIC: Continuation {continuation_count} empty: {not continuation_text}")
+            
             if continuation_text:
                 # Test combined script quality before committing
                 test_script = current_script + '\n\n' + continuation_text
-                test_quality = await quality_analyzer.analyze_content_quality(test_script)
+                test_quality = await self.analyze_content_quality(test_script)
+                
+                # 🎯 DIAGNOSTIC: Log quality test results
+                logger.info(f"🔍 DIAGNOSTIC: Test quality score: {test_quality['overall_quality']['score']:.2f}")
+                logger.info(f"🔍 DIAGNOSTIC: Quality acceptable: {test_quality['overall_quality']['score'] >= MIN_QUALITY_SCORE}")
                 
                 # Only accept if quality doesn't degrade
                 if test_quality['overall_quality']['score'] >= MIN_QUALITY_SCORE:
@@ -612,22 +670,37 @@ Provide analysis in JSON format:
                     quality_analysis = test_quality
                     
                     logger.info(f"✅ Continuation accepted - Quality: {test_quality['overall_quality']['score']:.2f}")
+                    logger.info(f"🔍 DIAGNOSTIC: Total length after continuation {continuation_count}: {len(current_script)} characters")
                 else:
                     logger.warning(f"❌ Continuation rejected - Quality dropped to {test_quality['overall_quality']['score']:.2f}")
                     break
             else:
+                logger.warning(f"🔍 DIAGNOSTIC: Continuation {continuation_count} produced no content")
                 break
             
             await asyncio.sleep(1)
         
-        # Step 4: Final quality check
-        final_quality = await quality_analyzer.analyze_content_quality(current_script)
+        # 🎯 DIAGNOSTIC: Log final state
+        logger.info(f"🔍 DIAGNOSTIC: Final script length: {len(current_script)} characters")
+        logger.info(f"🔍 DIAGNOSTIC: Continuations attempted: {continuation_count}")
+        logger.info(f"🔍 DIAGNOSTIC: Length target met: {len(current_script) >= MIN_LENGTH}")
         
-        if final_quality['overall_quality']['score'] < MIN_QUALITY_SCORE:
-            logger.warning(f"⚠️ Final script quality below threshold: {final_quality['overall_quality']['score']:.2f}")
+        # Final quality check
+        final_quality = quality_analysis['overall_quality']['score']
+        if final_quality < MIN_QUALITY_SCORE:
+            logger.warning(f"⚠️ Final script quality below threshold: {final_quality}")
             
-            # Attempt quality improvement
-            current_script = await self._improve_script_quality(current_script, final_quality)
+            # Try to improve quality, but ONLY if it doesn't make the script shorter
+            original_length = len(current_script)
+            improved_script = await self._improve_script_quality(current_script, quality_analysis)
+            
+            if len(improved_script) >= original_length:
+                # Only use improvement if it doesn't make script shorter
+                current_script = improved_script
+                logger.info(f"✅ Quality improvement successful: {final_quality}")
+            else:
+                # Keep original script if improvement makes it shorter
+                logger.warning(f"⚠️ Quality improvement rejected - would reduce length from {original_length} to {len(improved_script)} chars")
         
         # Clean and return
         current_script = text_cleaner.clean_for_voice(current_script)
@@ -635,8 +708,8 @@ Provide analysis in JSON format:
         # Final logging
         logger.info(f"🏆 SEMANTIC CONTINUATION COMPLETE:")
         logger.info(f"   📊 Length: {len(current_script)} characters")
-        logger.info(f"   📈 Quality Score: {final_quality['overall_quality']['score']:.2f}")
-        logger.info(f"   ✅ Production Ready: {final_quality['overall_quality']['is_production_ready']}")
+        logger.info(f"   📈 Quality Score: {final_quality:.2f}")
+        logger.info(f"   ✅ Production Ready: {quality_analysis['overall_quality']['is_production_ready']}")
         
         return current_script
 
@@ -803,7 +876,7 @@ Provide analysis in JSON format:
         
         logger.info(f"Combined {len(chunks)} chunks into final script: {len(final_script)} characters")
         return final_script
-
+    
     @parallel_task('api_call')
     async def modify_script_context_aware(
         self,
@@ -840,7 +913,7 @@ Provide analysis in JSON format:
         except Exception as e:
             logger.error(f"Script modification error: {str(e)}")
             raise AIGenerationError(f"Failed to modify script: {str(e)}")
-
+    
     async def bulk_modify_script(
         self,
         modifications: List[Dict[str, Any]],
@@ -885,7 +958,7 @@ Provide analysis in JSON format:
         except Exception as e:
             logger.error(f"Bulk script modification error: {str(e)}")
             raise AIGenerationError(f"Failed to process bulk modifications: {str(e)}")
-
+    
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=4, max=10)
@@ -926,7 +999,7 @@ Provide analysis in JSON format:
         except Exception as e:
             logger.error(f"Character extraction error: {str(e)}")
             raise AIGenerationError(f"Failed to extract characters: {str(e)}")
-
+    
     @parallel_task('api_call')
     async def analyze_script_segment(self, segment: str, segment_id: str) -> Dict[str, Any]:
         """Analyze a script segment for scene matching."""
@@ -978,7 +1051,7 @@ Provide analysis in JSON format:
         except Exception as e:
             logger.error(f"Script segment analysis error: {str(e)}")
             raise AIGenerationError(f"Failed to analyze script segment: {str(e)}")
-
+    
     async def parallel_script_analysis(
         self,
         script_segments: List[str],
@@ -1011,7 +1084,7 @@ Provide analysis in JSON format:
         except Exception as e:
             logger.error(f"Parallel script analysis error: {str(e)}")
             raise AIGenerationError(f"Failed to analyze script segments: {str(e)}")
-
+    
     async def get_usage_stats(self) -> Dict[str, Any]:
         """Get OpenAI API usage statistics."""
         # This would typically integrate with OpenAI's usage API
@@ -1024,7 +1097,7 @@ Provide analysis in JSON format:
             "available_actions": list(self.modification_actions.keys()),
             "prompts_loaded": len(self.prompts)
         }
-
+    
     async def extract_characters_from_script(self, script_text: str, account_info=None) -> List[str]:
         """Extract character names from script text using OpenAI with credit management."""
         try:
@@ -1090,7 +1163,7 @@ Provide analysis in JSON format:
             logger.error(f"Unexpected error in character extraction: {str(e)}")
             # Fallback to regex-based extraction
             return self._extract_characters_fallback(script_text)
-
+    
     def _extract_characters_fallback(self, script_text: str) -> List[str]:
         """Fallback method to extract character names using regex."""
         try:
@@ -1114,7 +1187,7 @@ Provide analysis in JSON format:
         except Exception as e:
             logger.error(f"Fallback character extraction error: {str(e)}")
             return ["Unknown Character"]
-
+    
     async def analyze_script_segments(self, script_text: str, account_info=None) -> List[Dict[str, Any]]:
         """Analyze script and break it into segments with OpenAI and credit management."""
         try:
@@ -1135,13 +1208,13 @@ Provide analysis in JSON format:
             
             Return as JSON array with this structure:
             [
-                {{
+              {{
                 "text": "segment text",
                 "characters": ["character1", "character2"],
                 "actions": ["action1", "action2"],
                 "tone": "tone description",
                 "duration_estimate": 15
-                }}
+              }}
             ]
             
             Script:
@@ -1175,7 +1248,7 @@ Provide analysis in JSON format:
         except Exception as e:
             logger.error(f"Error in script analysis: {str(e)}")
             return self._create_basic_segments(script_text)
-
+    
     def _create_basic_segments(self, script_text: str) -> List[Dict[str, Any]]:
         """Create basic segments by splitting script into sentences."""
         try:

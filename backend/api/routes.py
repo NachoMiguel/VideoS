@@ -29,6 +29,7 @@ from services.youtube import YouTubeService
 from services.openai import OpenAIService
 from services.elevenlabs import ElevenLabsService
 from services.image_search import ImageSearchService
+from services.topic_driven_generator import TopicDrivenScriptGenerator
 
 router = APIRouter()
 
@@ -107,7 +108,12 @@ async def extract_transcript(
             prompt = custom_prompt
             
         openai_service = openai_module.get_openai_service()
-        rewritten_script = await openai_service.generate_script(transcript, prompt)
+        #  NEW: Pass video_id to generate_script
+        rewritten_script = await openai_service.generate_script(transcript, prompt, video_id)
+        
+        #  NEW: Format script for clean display
+        from services.text_cleaner import text_cleaner
+        formatted_script = text_cleaner.format_script_for_display(rewritten_script)
         
         # 🎯 NEW: Save the generated script to script_tests folder
         try:
@@ -121,33 +127,19 @@ async def extract_transcript(
             filename = f"generated_script_{timestamp}_{safe_video_id}.txt"
             filepath = script_tests_dir / filename
             
-            # Save script with metadata
-            script_content = f"""=== GENERATED SCRIPT ===
-Session ID: {session_id}
-Video ID: {video_id}
-YouTube URL: {youtube_url}
-Generated: {datetime.now().isoformat()}
-Script Length: {len(rewritten_script)} characters
-Prompt Used: {'Default' if use_default_prompt else 'Custom'}
-
-=== SCRIPT CONTENT ===
-{rewritten_script}
-
-=== END SCRIPT ===
-"""
-            
+            # Save CLEAN script content (no metadata)
             with open(filepath, 'w', encoding='utf-8') as f:
-                f.write(script_content)
+                f.write(formatted_script)
             
-            logger.info(f"✅ Script saved to: {filepath}")
+            logger.info(f"✅ Clean script saved to: {filepath}")
             
         except Exception as save_error:
             logger.warning(f"Failed to save script to script_tests folder: {str(save_error)}")
             # Don't fail the entire request if saving fails
         
-        # Complete the session update (this might have been the issue)
+        # Complete the session update with formatted script
         script_data = {
-            "content": rewritten_script,
+            "content": formatted_script,  # Use formatted version
             "source": "generated",
             "youtube_url": youtube_url,
             "original_transcript": transcript,
