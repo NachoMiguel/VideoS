@@ -159,7 +159,91 @@ class TopicDrivenScriptGenerator:
             logger.error(f"❌ AI vocabulary simplification failed: {e}")
             print(f"❌ DEBUG: AI simplification error: {str(e)}")
             return script  # Return original if simplification fails
-    
+
+    async def _simplify_large_script(self, script: str) -> str:
+        """Simplify large scripts by processing in chunks with smart fallback."""
+        logger.info("🔧 Starting chunked vocabulary simplification for large script")
+        
+        # 🎯 HYBRID APPROACH: Use smaller chunks for better reliability
+        chunk_size = 8000  # Smaller chunks for vocabulary simplification
+        chunks = [script[i:i+chunk_size] for i in range(0, len(script), chunk_size)]
+        
+        logger.info(f"🔧 Split into {len(chunks)} chunks of ~{chunk_size} characters each")
+        
+        simplified_chunks = []
+        ai_success_count = 0
+        fallback_count = 0
+        
+        for i, chunk in enumerate(chunks):
+            logger.info(f"🔧 Processing chunk {i+1}/{len(chunks)}")
+            
+            try:
+                # 🎯 ATTEMPT 1: AI-powered simplification
+                simplification_prompt = f"""
+                VOCABULARY SIMPLIFICATION: Simplify complex vocabulary in this script chunk while maintaining meaning and engagement.
+                
+                REQUIREMENTS:
+                1. Replace complex phrases with simpler, clearer alternatives
+                2. Maintain the dramatic, engaging tone
+                3. Keep the same meaning and impact
+                4. Use direct, accessible language
+                5. Avoid overly academic or flowery language
+                6. IMPORTANT: Return ONLY the simplified script chunk, no explanations
+                
+                SCRIPT CHUNK TO SIMPLIFY:
+                {chunk}
+                
+                Simplified script chunk:
+                """
+                
+                response = await self.openai_service.client.chat.completions.create(
+                    model=self.openai_service.model,
+                    messages=[
+                        {"role": "system", "content": "You are an expert editor who simplifies complex vocabulary while maintaining engagement and meaning. Return only the simplified text."},
+                        {"role": "user", "content": simplification_prompt}
+                    ],
+                    temperature=0.3,
+                    max_tokens=12000,
+                    timeout=45.0
+                )
+                
+                simplified_chunk = response.choices[0].message.content.strip()
+                
+                # 🎯 VALIDATION: Ensure simplification didn't lose too much content
+                if len(simplified_chunk) < len(chunk) * 0.7:
+                    logger.warning(f"⚠️ Chunk {i+1} simplification appears to have truncated content, using rule-based fallback")
+                    raise ValueError("Simplification truncated content")
+                
+                simplified_chunks.append(simplified_chunk)
+                ai_success_count += 1
+                logger.info(f"✅ Chunk {i+1} AI simplification successful")
+                
+            except Exception as e:
+                logger.warning(f"⚠️ Chunk {i+1} AI simplification failed: {e}, using rule-based fallback")
+                
+                # 🎯 ATTEMPT 2: Rule-based fallback
+                try:
+                    optimizer = TTSScriptOptimizer()
+                    fallback_chunk = optimizer.optimize_for_tts(chunk)
+                    simplified_chunks.append(fallback_chunk)
+                    fallback_count += 1
+                    logger.info(f"✅ Chunk {i+1} rule-based fallback successful")
+                    
+                except Exception as fallback_error:
+                    logger.error(f"❌ Chunk {i+1} both AI and rule-based failed: {fallback_error}, using original")
+                    simplified_chunks.append(chunk)  # Use original as last resort
+        
+        # 🎯 ASSEMBLE FINAL RESULT
+        final_script = ' '.join(simplified_chunks)
+        
+        # 🎯 VALIDATION: Ensure final result is reasonable
+        if len(final_script) < len(script) * 0.8:
+            logger.warning("⚠️ Final simplified script appears to have lost too much content, using original")
+            return script
+        
+        logger.info(f"✅ Chunked vocabulary simplification complete: {ai_success_count} AI, {fallback_count} rule-based")
+        return final_script
+
     async def _apply_post_processing(self, script: str, video_id: str = None) -> str:
         """Apply all post-processing corrections to the final script."""
         logger.info("🔧 Applying post-processing corrections...")
@@ -171,8 +255,8 @@ class TopicDrivenScriptGenerator:
         # 🎯 NEW: Step 2: Clean TTS-unfriendly characters
         script = self._clean_tts_characters(script)
         
-        # 🎯 TEMPORARILY DISABLED: AI vocabulary simplification (causing truncation)
-        # script = await self._apply_ai_vocabulary_simplification(script)
+        # 🎯 ENABLED: AI vocabulary simplification with hybrid fallback
+        script = await self._apply_ai_vocabulary_simplification(script)
         
         # Step 3: Clean up any formatting issues
         script = re.sub(r'\s+', ' ', script)  # Remove extra whitespace

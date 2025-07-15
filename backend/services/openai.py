@@ -263,7 +263,7 @@ Provide only the connecting text (can be empty if contexts connect naturally).
             # Transcript too long - will need chunking (unlikely with 125k context)
             logger.warning(f"Transcript ({input_tokens} tokens) exceeds context limit ({available_context}). Consider chunking.")
             optimal_tokens = MAX_COMPLETION_TOKENS
-        else:
+            else:
             # For 20,000-30,000 character target (5,000-7,500 tokens)
             target_chars = 30000  # Upper end of range for longer output
             target_tokens = target_chars // 4  # 7,500 tokens
@@ -281,7 +281,7 @@ Provide only the connecting text (can be empty if contexts connect naturally).
         logger.info(f"INSIDE GENERATE WITH CONTINUATION---->BEFORE CHAT COMPLETION")
 
         # Step 1: Generate initial script
-        response = await self.client.chat.completions.create(
+            response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": "You are an expert video script writer specializing in creating engaging content for video assembly."},

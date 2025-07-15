@@ -234,8 +234,8 @@ class YouTubeService:
             'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         ]
         
-            session = requests.Session()
-            session.headers.update({
+        session = requests.Session()
+        session.headers.update({
         'User-Agent': random.choice(user_agents),
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
                 'Accept-Language': 'en-US,en;q=0.9',
@@ -253,10 +253,10 @@ class YouTubeService:
         await asyncio.sleep(random.uniform(0.5, 2.0))
         
         # Monkey patch the session
-            original_session = requests.Session
-            requests.Session = lambda: session
+        original_session = requests.Session
+        requests.Session = lambda: session
             
-            try:
+        try:
         # Try multiple language codes
             language_options = [language]
             if language != 'en':
@@ -268,12 +268,12 @@ class YouTubeService:
             )       
                 
             logger.info(f"✅ Updated youtube-transcript-api: {len(transcript)} segments")
-                return transcript
+            return transcript
         
         except Exception as e:
             logger.error(f"Updated youtube-transcript-api failed: {str(e)}")
             raise TranscriptNotFoundError(f"Transcript extraction failed: {str(e)}")
-            finally:
+        finally:
                 requests.Session = original_session
             
     async def get_transcript_hybrid_free(self, video_id: str, language: str = 'en') -> list[dict]:
