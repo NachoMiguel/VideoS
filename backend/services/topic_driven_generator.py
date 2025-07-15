@@ -111,7 +111,11 @@ class TopicDrivenScriptGenerator:
         try:
             logger.info("🔧 Applying AI-powered vocabulary simplification...")
             
-            # 🎯 FIXED: Use the correct OpenAI service reference
+            # 🎯 FIXED: Check if script is too long for single API call
+            if len(script) > 12000:
+                logger.info("📏 Long script detected, using chunked simplification")
+                return await self._simplify_large_script(script)
+            
             simplification_prompt = f"""
             VOCABULARY SIMPLIFICATION: Simplify complex vocabulary in this script while maintaining meaning and engagement.
             
@@ -121,26 +125,33 @@ class TopicDrivenScriptGenerator:
             3. Keep the same meaning and impact
             4. Use direct, accessible language
             5. Avoid overly academic or flowery language
+            6. IMPORTANT: Return ONLY the simplified script, no explanations
             
             SCRIPT TO SIMPLIFY:
             {script}
             
-            Return the simplified script with no additional text or explanations.
+            Simplified script:
             """
             
-            # 🎯 FIXED: Use the correct client reference
+            # 🎯 FIXED: Use proper error handling and validation
             response = await self.openai_service.client.chat.completions.create(
                 model=self.openai_service.model,
                 messages=[
-                    {"role": "system", "content": "You are an expert editor who simplifies complex vocabulary while maintaining engagement and meaning."},
+                    {"role": "system", "content": "You are an expert editor who simplifies complex vocabulary while maintaining engagement and meaning. Return only the simplified text."},
                     {"role": "user", "content": simplification_prompt}
                 ],
                 temperature=0.3,
                 max_tokens=16000,
-                timeout=60.0  #  INCREASED timeout
+                timeout=60.0
             )
             
             simplified_script = response.choices[0].message.content.strip()
+            
+            # 🎯 CRITICAL FIX: Validate simplification worked
+            if len(simplified_script) < len(script) * 0.7:  # If too much was lost
+                logger.warning("⚠️ Vocabulary simplification appears to have truncated script, using original")
+                return script
+            
             logger.info("✅ Applied AI vocabulary simplification")
             return simplified_script
             
@@ -157,8 +168,8 @@ class TopicDrivenScriptGenerator:
         if video_id:
             script = await self._apply_dynamic_name_corrections(script, video_id)
         
-        # Step 2: Apply AI-powered vocabulary simplification
-        script = await self._apply_ai_vocabulary_simplification(script)
+        # 🎯 TEMPORARILY DISABLED: AI vocabulary simplification (causing truncation)
+        # script = await self._apply_ai_vocabulary_simplification(script)
         
         # Step 3: Clean up any formatting issues
         script = re.sub(r'\s+', ' ', script)  # Remove extra whitespace
@@ -168,7 +179,7 @@ class TopicDrivenScriptGenerator:
         return script
 
     async def generate_script(self, transcript: str, video_id: str = None) -> str:
-        """Generate script using topic-driven approach with dynamic corrections."""
+        """Generate script using topic-driven approach with enhanced debugging."""
         
         print("🎯 DEBUG: Starting Topic-Driven Script Generation")
         logger.info("🎯 Starting Topic-Driven Script Generation")
@@ -178,20 +189,7 @@ class TopicDrivenScriptGenerator:
         logger.info(f"🎯 Video ID: {video_id}")
         
         try:
-            # 🎯 CRITICAL: Apply name corrections BEFORE topic analysis
-            if video_id:
-                print("🔧 DEBUG: Applying name corrections to transcript before topic analysis...")
-                corrected_transcript = await self._apply_dynamic_name_corrections(transcript, video_id)
-                if corrected_transcript != transcript:
-                    print("✅ DEBUG: Transcript was corrected before topic analysis")
-                    print(f"🔧 DEBUG: 'vanam' in original: {'vanam' in transcript.lower()}")
-                    print(f"🔧 DEBUG: 'vanam' in corrected: {'vanam' in corrected_transcript.lower()}")
-                    print(f"🔧 DEBUG: 'Jean-Claude Van Damme' in corrected: {'Jean-Claude Van Damme' in corrected_transcript}")
-                    transcript = corrected_transcript
-                else:
-                    print("⚠️ DEBUG: No corrections applied to transcript")
-            
-            # Phase 1: Topic Analysis (now with corrected transcript)
+            # Phase 1: Topic Analysis
             print("🎯 DEBUG: Phase 1: Analyzing transcript topics")
             logger.info("🎯 Phase 1: Analyzing transcript topics")
             print("🔍 DEBUG: About to call _analyze_transcript_topics...")
@@ -221,20 +219,32 @@ class TopicDrivenScriptGenerator:
             print(f"✅ DEBUG: Topic generation completed, got {len(topic_sections)} sections")
             logger.info(f"✅ Topic generation completed, got {len(topic_sections)} sections")
             
-            # Phase 4: Assembly & Polish (now with video_id)
+            # 🎯 FIXED: Validate sections before assembly
+            total_section_length = sum(len(section) for section in topic_sections)
+            print(f"🔍 DEBUG: Total section length: {total_section_length} characters")
+            logger.info(f"🔍 Total section length: {total_section_length} characters")
+            
+            # Phase 4: Assembly & Polish
             print("🔧 DEBUG: Phase 4: Assembling and polishing final script")
             logger.info("🔧 Phase 4: Assembling and polishing final script")
             print("🔍 DEBUG: About to call _assemble_and_polish...")
             logger.info("🔍 About to call _assemble_and_polish...")
             
             final_script = await self._assemble_and_polish(topic_sections, video_id)
+            
+            # 🎯 FIXED: Final validation
             print(f"✅ DEBUG: Topic-Driven Generation Complete: {len(final_script)} characters")
             logger.info(f"✅ Topic-Driven Generation Complete: {len(final_script)} characters")
+            
+            if len(final_script) < 5000:  # Minimum acceptable length
+                logger.warning("⚠️ Final script too short, may indicate generation failure")
+            
             return final_script
             
         except Exception as e:
-            print(f"❌ DEBUG: Topic-driven generation failed: {str(e)}")
-            logger.error(f"❌ Topic-driven generation failed: {str(e)}")
+            logger.error(f"❌ Topic-driven script generation failed: {str(e)}")
+            logger.error(f"❌ Error type: {type(e).__name__}")
+            logger.error(f"❌ Full error details:", exc_info=True)
             raise
     
     async def _analyze_transcript_topics(self, transcript: str) -> List[Dict]:
@@ -692,8 +702,17 @@ class TopicDrivenScriptGenerator:
         
         logger.info("🔧 Phase 4: Assembling and polishing final script")
         
+        # 🎯 FIXED: Validate sections before assembly
+        if not sections:
+            logger.error("❌ No sections to assemble")
+            return ""
+        
         # Combine all sections
         combined_script = ' '.join(sections)
+        
+        # 🎯 FIXED: Validate combined script
+        if len(combined_script) < 1000:
+            logger.warning("⚠️ Combined script too short, may indicate generation failure")
         
         # Check if we need to split for polishing due to size
         if len(combined_script) > 15000:  # If too large for single API call
@@ -710,18 +729,19 @@ class TopicDrivenScriptGenerator:
             3. Fix any awkward phrasing or repetition
             4. Keep the engaging, dramatic style
             5. Ensure proper paragraph breaks for readability
+            6. IMPORTANT: Return ONLY the polished script, no explanations
             
             SCRIPT TO POLISH:
             {combined_script}
             
-            Return the polished script with no additional text or explanations.
+            Polished script:
             """
             
             try:
                 response = await self.openai_service.client.chat.completions.create(
                     model=self.openai_service.model,
                     messages=[
-                        {"role": "system", "content": "You are an expert script editor. Polish the script to perfection."},
+                        {"role": "system", "content": "You are an expert script editor. Polish the script to perfection. Return only polished text."},
                         {"role": "user", "content": polish_prompt}
                     ],
                     temperature=0.3,
@@ -731,51 +751,69 @@ class TopicDrivenScriptGenerator:
                 
                 final_script = response.choices[0].message.content.strip()
                 
+                # 🎯 FIXED: Validate polishing worked
+                if len(final_script) < len(combined_script) * 0.8:
+                    logger.warning("⚠️ Polishing appears to have truncated script, using original")
+                    final_script = combined_script
+                
             except Exception as e:
                 logger.warning(f"Polishing failed, using unpolished script: {e}")
                 final_script = combined_script
         
-        # ✅ NEW: Apply dynamic post-processing corrections
+        # 🎯 FIXED: Apply post-processing with validation
+        original_length = len(final_script)
         final_script = await self._apply_post_processing(final_script, video_id)
+        
+        # 🎯 FIXED: Final validation
+        if len(final_script) < original_length * 0.8:
+            logger.warning("⚠️ Post-processing appears to have truncated script")
         
         logger.info(f"✅ Final script complete: {len(final_script)} characters")
         return final_script
 
     async def _polish_large_script(self, script: str) -> str:
-        """Polish large scripts by processing in chunks."""
+        """Polish large scripts by processing in chunks with improved error handling."""
         print("🔧 DEBUG: Starting chunked polish for large script")
         logger.info("🔧 Starting chunked polish for large script")
         
-        # Split into manageable chunks
-        chunk_size = 15000  # Smaller chunks to avoid timeouts
+        # 🎯 SIMPLIFIED: Use simple chunking without overlap to avoid complexity
+        chunk_size = 12000  # Reduced from 15000
         chunks = [script[i:i+chunk_size] for i in range(0, len(script), chunk_size)]
         
         polished_chunks = []
         for i, chunk in enumerate(chunks):
             print(f"🔧 DEBUG: Polishing chunk {i+1}/{len(chunks)}")
-            logger.info(f" Polishing chunk {i+1}/{len(chunks)}")
+            logger.info(f"🔧 Polishing chunk {i+1}/{len(chunks)}")
             
             try:
                 chunk_prompt = f"""
-                Polish this script chunk to improve flow and coherence:
+                Polish this script chunk to improve flow and coherence.
+                IMPORTANT: Return ONLY the polished text, no explanations or additional text.
                 
                 {chunk}
                 
-                Return the polished version:
+                Polished version:
                 """
                 
                 response = await self.openai_service.client.chat.completions.create(
                     model=self.openai_service.model,
                     messages=[
-                        {"role": "system", "content": "You are an expert script editor."},
+                        {"role": "system", "content": "You are an expert script editor. Return only polished text."},
                         {"role": "user", "content": chunk_prompt}
                     ],
-                    temperature=0.5,
-                    max_tokens=8000,
-                    timeout=30.0  # Shorter timeout per chunk
+                    temperature=0.3,  # Reduced for consistency
+                    max_tokens=12000,  # Increased to handle full chunk
+                    timeout=45.0  # Increased timeout
                 )
                 
                 polished_chunk = response.choices[0].message.content.strip()
+                
+                # 🎯 FIXED: Validate chunk was actually polished
+                if len(polished_chunk) < len(chunk) * 0.5:  # If chunk was severely truncated
+                    print(f"⚠️ DEBUG: Chunk {i+1} appears truncated, using original")
+                    logger.warning(f"⚠️ Chunk {i+1} appears truncated, using original")
+                    polished_chunk = chunk
+                
                 polished_chunks.append(polished_chunk)
                 
             except Exception as e:
@@ -783,8 +821,15 @@ class TopicDrivenScriptGenerator:
                 logger.warning(f"⚠️ Chunk {i+1} polish failed, using original: {str(e)}")
                 polished_chunks.append(chunk)
         
-        # Combine polished chunks
-        final_script = "\n\n".join(polished_chunks)
+        # 🎯 SIMPLIFIED: Simple concatenation without complex overlap removal
+        final_script = " ".join(polished_chunks)
+        
+        # 🎯 FIXED: Validate final script integrity
+        if len(final_script) < len(script) * 0.8:  # If we lost more than 20%
+            print(f"⚠️ DEBUG: Final script too short ({len(final_script)} vs {len(script)}), using original")
+            logger.warning(f"⚠️ Final script too short, using original")
+            final_script = script
+        
         final_script = text_cleaner.clean_for_voice(final_script)
         
         print(f"🔧 DEBUG: Chunked polish complete: {len(final_script)} characters")

@@ -221,11 +221,11 @@ class YouTubeService:
             raise TranscriptNotFoundError(f"Could not extract transcript: {str(e)}")
 
     async def get_transcript_updated_free(self, video_id: str, language: str = 'en') -> list[dict]:
-        """Updated youtube-transcript-api with modern headers and rotation."""
+        """Use updated youtube-transcript-api with session monkey patching."""
+        from youtube_transcript_api import YouTubeTranscriptApi
         import requests
         import random
         import asyncio
-        from youtube_transcript_api import YouTubeTranscriptApi
         
         # Modern browser headers rotation
         user_agents = [
@@ -275,7 +275,7 @@ class YouTubeService:
             raise TranscriptNotFoundError(f"Transcript extraction failed: {str(e)}")
         finally:
             requests.Session = original_session
-
+            
     async def get_transcript_hybrid_free(self, video_id: str, language: str = 'en') -> list[dict]:
         """Hybrid approach: yt-dlp validation + youtube-transcript-api extraction."""
         import yt_dlp
@@ -547,7 +547,7 @@ class YouTubeService:
                         'duration': event.get('dDurationMs', 0) / 1000.0
                     })
         
-        return transcript
+            return transcript
 
     async def _build_correction_dictionary(self, context: dict) -> dict:
         """Build DYNAMIC correction dictionary based on video context."""
@@ -657,7 +657,7 @@ class YouTubeService:
                 return mistakes if isinstance(mistakes, list) else []
             except json.JSONDecodeError:
                 return []
-                
+            
         except Exception as e:
             logger.warning(f"AI ASR generation failed, using fallback: {e}")
             return self._generate_fallback_asr_mistakes(name)

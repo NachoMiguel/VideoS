@@ -282,15 +282,15 @@ Provide only the connecting text (can be empty if contexts connect naturally).
 
         # Step 1: Generate initial script
         response = await self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": "You are an expert video script writer specializing in creating engaging content for video assembly."},
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "You are an expert video script writer specializing in creating engaging content for video assembly."},
             {"role": "user", "content": initial_prompt}
-            ],
-            temperature=self.temperature,
+                ],
+                temperature=self.temperature,
         max_tokens=max_tokens,
-            timeout=self.timeout
-        )
+                timeout=self.timeout
+            )
         logger.info(f"INSIDE GENERATE WITH CONTINUATION---->AFTER CHAT COMPLETION")
 
         current_script = response.choices[0].message.content.strip()
