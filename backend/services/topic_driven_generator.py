@@ -26,46 +26,83 @@ class TopicDrivenScriptGenerator:
         self.target_length = 25000  # 20k-30k target
         self.min_length = 20000
         
-        # 🎯 NEW: Reference to YouTube service for dynamic corrections
-        self.youtube_service = None  # Will be set when needed
+        # 🎯 NEW: Cache for YouTube metadata and corrections
+        self._youtube_service = None
+        self._cached_metadata = {}  # video_id -> metadata
+        self._cached_corrections = {}  # video_id -> corrections
     
     def _get_youtube_service(self):
         """Lazy initialization of YouTube service for name corrections."""
-        if self.youtube_service is None:
+        if self._youtube_service is None:
             from .youtube import YouTubeService
-            self.youtube_service = YouTubeService()
-        return self.youtube_service
+            # 🎯 NEW: Pass OpenAI service to YouTube service
+            self._youtube_service = YouTubeService(openai_service=self.openai_service)
+        return self._youtube_service
+    
+    async def _get_cached_metadata_and_corrections(self, video_id: str) -> tuple[dict, dict]:
+        """Get cached metadata and corrections, or extract once and cache."""
+        
+        if video_id in self._cached_metadata:
+            print(f"🔧 DEBUG: Using cached metadata for {video_id}")
+            return self._cached_metadata[video_id], self._cached_corrections[video_id]
+        
+        print(f"🔧 DEBUG: Extracting metadata for {video_id} (first time)")
+        
+        # Extract metadata ONCE
+        youtube_service = self._get_youtube_service()
+        metadata = await youtube_service.extract_video_context(video_id)
+        
+        # Build corrections ONCE
+        corrections = await youtube_service._build_correction_dictionary(metadata)
+        
+        # Cache for future use
+        self._cached_metadata[video_id] = metadata
+        self._cached_corrections[video_id] = corrections
+        
+        return metadata, corrections
     
     async def _apply_dynamic_name_corrections(self, script: str, video_id: str) -> str:
-        """Apply dynamic name corrections using the existing YouTube service system."""
+        """Apply dynamic name corrections using cached metadata."""
         
         try:
             logger.info("🔧 Applying dynamic name corrections...")
+            print(f"🔧 DEBUG: Starting name correction for video_id: {video_id}")
             
-            # Get YouTube service
-            youtube_service = self._get_youtube_service()
+            # 🎯 NEW: Use cached metadata and corrections
+            metadata, corrections = await self._get_cached_metadata_and_corrections(video_id)
             
-            # Extract video context (this gets the correct names from title/description)
-            context = await youtube_service.extract_video_context(video_id)
-            
-            # Build dynamic correction dictionary
-            corrections = youtube_service._build_correction_dictionary(context)
+            print(f"🔧 DEBUG: Using cached corrections with {len(corrections)} entries")
             
             if corrections:
-                logger.info(f"📚 Built dynamic correction dictionary with {len(corrections)} entries")
-                logger.info(f"🎯 Entities found: {context.get('potential_entities', [])}")
+                logger.info(f"📚 Using cached correction dictionary with {len(corrections)} entries")
+                
+                # Debug: Show what we're correcting
+                print(f"🔧 DEBUG: Original script contains 'vanam': {'vanam' in script.lower()}")
+                print(f"🔧 DEBUG: Original script contains 'seagull': {'seagull' in script.lower()}")
                 
                 # Apply corrections using the existing method
+                youtube_service = self._get_youtube_service()
                 corrected_script = youtube_service._apply_corrections(script, corrections)
+                
+                # Debug: Show what changed
+                if corrected_script != script:
+                    print("🔧 DEBUG: Script was corrected!")
+                    print(f"🔧 DEBUG: Corrected script contains 'Van Damme': {'Van Damme' in corrected_script}")
+                    print(f"🔧 DEBUG: Corrected script contains 'Seagal': {'Seagal' in corrected_script}")
+                    print(f"🔧 DEBUG: Corrected script contains 'vanam': {'vanam' in corrected_script.lower()}")
+                else:
+                    print("🔧 DEBUG: No corrections were applied!")
                 
                 logger.info("✅ Applied dynamic name corrections")
                 return corrected_script
             else:
-                logger.info("⚠️ No corrections needed or no entities found")
+                logger.info("⚠️ No corrections available")
+                print("🔧 DEBUG: No corrections dictionary available!")
                 return script
                 
         except Exception as e:
             logger.error(f"❌ Dynamic name correction failed: {e}")
+            print(f"❌ DEBUG: Name correction error: {str(e)}")
             return script  # Return original if correction fails
     
     async def _apply_ai_vocabulary_simplification(self, script: str) -> str:
@@ -74,6 +111,7 @@ class TopicDrivenScriptGenerator:
         try:
             logger.info("🔧 Applying AI-powered vocabulary simplification...")
             
+            # 🎯 FIXED: Use the correct OpenAI service reference
             simplification_prompt = f"""
             VOCABULARY SIMPLIFICATION: Simplify complex vocabulary in this script while maintaining meaning and engagement.
             
@@ -84,24 +122,13 @@ class TopicDrivenScriptGenerator:
             4. Use direct, accessible language
             5. Avoid overly academic or flowery language
             
-            EXAMPLES OF SIMPLIFICATION:
-            - "simmered beneath the surface" → "was building up"
-            - "palpable tension" → "clear tension"
-            - "manifesting through" → "showing in"
-            - "veiled insults" → "hidden insults"
-            - "strategic silences" → "careful silences"
-            - "circled each other" → "competed with each other"
-            - "wary predators" → "careful competitors"
-            - "erupting into" → "turning into"
-            - "direct confrontation" → "open fight"
-            - "fascinated the industry" → "interested everyone"
-            
             SCRIPT TO SIMPLIFY:
             {script}
             
             Return the simplified script with no additional text or explanations.
             """
             
+            # 🎯 FIXED: Use the correct client reference
             response = await self.openai_service.client.chat.completions.create(
                 model=self.openai_service.model,
                 messages=[
@@ -110,7 +137,7 @@ class TopicDrivenScriptGenerator:
                 ],
                 temperature=0.3,
                 max_tokens=16000,
-                timeout=self.openai_service.timeout
+                timeout=60.0  #  INCREASED timeout
             )
             
             simplified_script = response.choices[0].message.content.strip()
@@ -119,6 +146,7 @@ class TopicDrivenScriptGenerator:
             
         except Exception as e:
             logger.error(f"❌ AI vocabulary simplification failed: {e}")
+            print(f"❌ DEBUG: AI simplification error: {str(e)}")
             return script  # Return original if simplification fails
     
     async def _apply_post_processing(self, script: str, video_id: str = None) -> str:
@@ -144,15 +172,28 @@ class TopicDrivenScriptGenerator:
         
         print("🎯 DEBUG: Starting Topic-Driven Script Generation")
         logger.info("🎯 Starting Topic-Driven Script Generation")
-        print(f" DEBUG: Transcript length: {len(transcript)} characters")
-        logger.info(f" Transcript length: {len(transcript)} characters")
+        print(f"🎯 DEBUG: Transcript length: {len(transcript)} characters")
+        logger.info(f"🎯 Transcript length: {len(transcript)} characters")
         print(f"🎯 DEBUG: Video ID: {video_id}")
         logger.info(f"🎯 Video ID: {video_id}")
         
         try:
-            # Phase 1: Topic Analysis
-            print(" DEBUG: Phase 1: Analyzing transcript topics")
-            logger.info(" Phase 1: Analyzing transcript topics")
+            # 🎯 CRITICAL: Apply name corrections BEFORE topic analysis
+            if video_id:
+                print("🔧 DEBUG: Applying name corrections to transcript before topic analysis...")
+                corrected_transcript = await self._apply_dynamic_name_corrections(transcript, video_id)
+                if corrected_transcript != transcript:
+                    print("✅ DEBUG: Transcript was corrected before topic analysis")
+                    print(f"🔧 DEBUG: 'vanam' in original: {'vanam' in transcript.lower()}")
+                    print(f"🔧 DEBUG: 'vanam' in corrected: {'vanam' in corrected_transcript.lower()}")
+                    print(f"🔧 DEBUG: 'Jean-Claude Van Damme' in corrected: {'Jean-Claude Van Damme' in corrected_transcript}")
+                    transcript = corrected_transcript
+                else:
+                    print("⚠️ DEBUG: No corrections applied to transcript")
+            
+            # Phase 1: Topic Analysis (now with corrected transcript)
+            print("🎯 DEBUG: Phase 1: Analyzing transcript topics")
+            logger.info("🎯 Phase 1: Analyzing transcript topics")
             print("🔍 DEBUG: About to call _analyze_transcript_topics...")
             logger.info("🔍 About to call _analyze_transcript_topics...")
             
@@ -199,199 +240,205 @@ class TopicDrivenScriptGenerator:
     async def _analyze_transcript_topics(self, transcript: str) -> List[Dict]:
         """Extract main topics from transcript with context."""
         
-        # 🎯 FORCE DEBUGGING: Use both logging and print
-        print("🔍 DEBUG: _analyze_transcript_topics called")
-        logger.info("🔍 DEBUG: _analyze_transcript_topics called")
-        
-        analysis_prompt = f"""
-        CRITICAL REQUIREMENT: Extract 6-10 main topics that will create a 20,000-30,000 character script.
-        
-        CONTENT TRANSFORMATION GOALS:
-        1. Identify topics that can be elevated with engaging storytelling techniques
-        2. Focus on controversial, shocking, or unknown elements
-        3. Include recent rumors, controversies, and speculations
-        4. Highlight challenges, untold stories, or conflicts
-        
-        TOPICS AND THEMES TO LOOK FOR:
-        - Controversial, shocking, or unknown elements of the subject's life or career
-        - Recent rumors, controversies, and speculations
-        - Subject's challenges, untold stories, or conflicts
-        - Emotional moments and relatable human experiences
-        - Mysterious or intriguing elements that create curiosity gaps
-        
-        TRANSCRIPT:
-        {transcript}
-        
-        You MUST respond with ONLY valid JSON in this exact format:
-        {{
-            "topics": [
+        # 🎯 NEW: Add retry logic for OpenAI calls
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                print(f"🔍 DEBUG: Topic analysis attempt {attempt + 1}/{max_retries}")
+                
+                # 🎯 NEW: Log the transcript being analyzed
+                print("=" * 80)
+                print("🎯 TRANSCRIPT ANALYSIS:")
+                print("=" * 80)
+                print(f"📄 TRANSCRIPT LENGTH: {len(transcript)} characters")
+                print(f"📄 TRANSCRIPT PREVIEW: {transcript[:500]}...")
+                print("=" * 80)
+                
+                # 🎯 FORCE DEBUGGING: Use both logging and print
+                print("🔍 DEBUG: _analyze_transcript_topics called")
+                logger.info("🔍 DEBUG: _analyze_transcript_topics called")
+                
+                analysis_prompt = f"""
+                CRITICAL REQUIREMENT: Extract 6-10 main topics that will create a 20,000-30,000 character script.
+                
+                CONTENT TRANSFORMATION GOALS:
+                1. Identify topics that can be elevated with engaging storytelling techniques
+                2. Focus on controversial, shocking, or unknown elements
+                3. Include recent rumors, controversies, and speculations
+                4. Highlight challenges, untold stories, or conflicts
+                
+                TOPICS AND THEMES TO LOOK FOR:
+                - Controversial, shocking, or unknown elements of the subject's life or career
+                - Recent rumors, controversies, and speculations
+                - Subject's challenges, untold stories, or conflicts
+                - Emotional moments and relatable human experiences
+                - Mysterious or intriguing elements that create curiosity gaps
+                
+                TRANSCRIPT:
+                {transcript}
+                
+                You MUST respond with ONLY valid JSON in this exact format:
                 {{
-                    "title": "Topic Title",
-                    "key_points": ["point1", "point2", "point3"],
-                    "quotes": ["relevant quote 1", "relevant quote 2"],
-                    "events": ["event1", "event2"],
-                    "context": "brief context about this topic",
-                    "controversy_level": "high/medium/low",
-                    "storytelling_potential": "high/medium/low",
-                    "emotional_hooks": ["hook1", "hook2"]
+                    "topics": [
+                        {{
+                            "title": "Topic Title",
+                            "key_points": ["point1", "point2", "point3"],
+                            "quotes": ["relevant quote 1", "relevant quote 2"],
+                            "events": ["event1", "event2"],
+                            "context": "brief context about this topic",
+                            "controversy_level": "high/medium/low",
+                            "storytelling_potential": "high/medium/low",
+                            "emotional_hooks": ["hook1", "hook2"]
+                        }}
+                    ]
                 }}
-            ]
-        }}
-        
-        IMPORTANT: Return ONLY the JSON object, no additional text or explanations.
-        """
-        
-        try:
-            print("🔍 DEBUG: About to call OpenAI API for topic analysis")
-            logger.info("🔍 DEBUG: About to call OpenAI API for topic analysis")
-            
-            # Generate topic analysis
-            response = await self.openai_service.client.chat.completions.create(
-                model=self.openai_service.model,
-                messages=[
-                    {"role": "system", "content": "You are an expert content analyst. You MUST respond with ONLY valid JSON in the exact format requested. No additional text."},
-                    {"role": "user", "content": analysis_prompt}
-                ],
-                temperature=0.1,  # Very low temperature for consistent JSON output
-                max_tokens=4000,
-                timeout=self.openai_service.timeout
-            )
-            
-            print("🔍 DEBUG: OpenAI API call completed")
-            logger.info("🔍 DEBUG: OpenAI API call completed")
-            
-            # 🎯 ENHANCED: Debug the actual response
-            raw_response = response.choices[0].message.content.strip()
-            print(f"🔍 DEBUG: Raw response length: {len(raw_response)}")
-            print(f"🔍 DEBUG: Raw response preview: {raw_response[:200]}...")
-            logger.info(f" Raw topic analysis response length: {len(raw_response)}")
-            logger.info(f"🔍 Raw response preview: {raw_response[:200]}...")
-            
-            # Check if response is empty
-            if not raw_response:
-                print("❌ DEBUG: Empty response from topic analysis")
-                logger.error("❌ Topic analysis returned empty response")
-                raise ValueError("Empty response from topic analysis")
-            
-            # Try to extract JSON if response contains extra text
-            json_start = raw_response.find('{')
-            json_end = raw_response.rfind('}') + 1
-            
-            if json_start == -1 or json_end == 0:
-                print(f"❌ DEBUG: No JSON found in response: {raw_response}")
-                logger.error(f"❌ No JSON found in response: {raw_response}")
-                raise ValueError("No JSON structure found in response")
-            
-            # Extract just the JSON part
-            json_content = raw_response[json_start:json_end]
-            print(f"🔍 DEBUG: Extracted JSON: {json_content[:200]}...")
-            logger.info(f"🔍 Extracted JSON: {json_content[:200]}...")
-            
-            # Parse and validate topics
-            topics_data = json.loads(json_content)
-            
-            if "topics" not in topics_data:
-                print(f"❌ DEBUG: No 'topics' key in JSON: {topics_data}")
-                logger.error(f"❌ No 'topics' key in JSON: {topics_data}")
-                raise ValueError("Invalid JSON structure - missing 'topics' key")
-            
-            topics = topics_data["topics"]
-            
-            if not topics:
-                print("❌ DEBUG: Empty topics list in JSON")
-                logger.error("❌ Empty topics list in JSON")
-                raise ValueError("Empty topics list")
-            
-            # ✅ NEW: Comprehensive topic logging with print statements
-            print(f"✅ DEBUG: Successfully extracted {len(topics)} topics from transcript")
-            logger.info(f"✅ Successfully extracted {len(topics)} topics from transcript")
-            
-            print("📋 DEBUG: TOPIC ANALYSIS RESULTS:")
-            logger.info("📋 TOPIC ANALYSIS RESULTS:")
-            print("=" * 60)
-            logger.info("=" * 60)
-            
-            for i, topic in enumerate(topics, 1):
-                print(f"🎯 DEBUG: TOPIC {i}: {topic.get('title', 'No title')}")
-                logger.info(f"🎯 TOPIC {i}: {topic.get('title', 'No title')}")
                 
-                print(f"   DEBUG: Key Points: {len(topic.get('key_points', []))} points")
-                logger.info(f"   Key Points: {len(topic.get('key_points', []))} points")
+                IMPORTANT: Return ONLY the JSON object, no additional text or explanations.
+                """
                 
-                for j, point in enumerate(topic.get('key_points', []), 1):
-                    print(f"      {j}. {point[:100]}{'...' if len(point) > 100 else ''}")
-                    logger.info(f"      {j}. {point[:100]}{'...' if len(point) > 100 else ''}")
+                # 🎯 INCREASED timeout for topic analysis
+                response = await self.openai_service.client.chat.completions.create(
+                    model=self.openai_service.model,
+                    messages=[
+                        {"role": "system", "content": "You are an expert content analyst. You MUST respond with ONLY valid JSON in the exact format requested. No additional text."},
+                        {"role": "user", "content": analysis_prompt}
+                    ],
+                    temperature=0.1,
+                    max_tokens=4000,
+                    timeout=90.0  #  INCREASED timeout
+                )
                 
-                print(f"   DEBUG: Quotes: {len(topic.get('quotes', []))} quotes")
-                logger.info(f"    Quotes: {len(topic.get('quotes', []))} quotes")
+                # 🎯 ENHANCED: Debug the actual response
+                raw_response = response.choices[0].message.content.strip()
+                print(f"🔍 DEBUG: Raw response length: {len(raw_response)}")
+                print(f"🔍 DEBUG: Raw response preview: {raw_response[:200]}...")
+                logger.info(f" Raw topic analysis response length: {len(raw_response)}")
+                logger.info(f"🔍 Raw response preview: {raw_response[:200]}...")
                 
-                for j, quote in enumerate(topic.get('quotes', []), 1):
-                    print(f"      {j}. \"{quote[:80]}{'...' if len(quote) > 80 else ''}\"")
-                    logger.info(f"      {j}. \"{quote[:80]}{'...' if len(quote) > 80 else ''}\"")
+                # Check if response is empty
+                if not raw_response:
+                    print("❌ DEBUG: Empty response from topic analysis")
+                    logger.error("❌ Topic analysis returned empty response")
+                    raise ValueError("Empty response from topic analysis")
                 
-                print(f"   📅 DEBUG: Events: {len(topic.get('events', []))} events")
-                logger.info(f"    Events: {len(topic.get('events', []))} events")
+                # Try to extract JSON if response contains extra text
+                json_start = raw_response.find('{')
+                json_end = raw_response.rfind('}') + 1
                 
-                for j, event in enumerate(topic.get('events', []), 1):
-                    print(f"      {j}. {event[:80]}{'...' if len(event) > 80 else ''}")
-                    logger.info(f"      {j}. {event[:80]}{'...' if len(event) > 80 else ''}")
+                if json_start == -1 or json_end == 0:
+                    print(f"❌ DEBUG: No JSON found in response: {raw_response}")
+                    logger.error(f"❌ No JSON found in response: {raw_response}")
+                    raise ValueError("No JSON structure found in response")
                 
-                print(f"   📖 DEBUG: Context: {topic.get('context', 'No context')[:100]}{'...' if len(topic.get('context', '')) > 100 else ''}")
-                logger.info(f"   📖 Context: {topic.get('context', 'No context')[:100]}{'...' if len(topic.get('context', '')) > 100 else ''}")
+                # Extract just the JSON part
+                json_content = raw_response[json_start:json_end]
+                print(f"🔍 DEBUG: Extracted JSON: {json_content[:200]}...")
+                logger.info(f"🔍 Extracted JSON: {json_content[:200]}...")
                 
-                print(f"   DEBUG: Controversy Level: {topic.get('controversy_level', 'unknown')}")
-                logger.info(f"   Controversy Level: {topic.get('controversy_level', 'unknown')}")
+                # Parse and validate topics
+                topics_data = json.loads(json_content)
                 
-                print(f"   📈 DEBUG: Storytelling Potential: {topic.get('storytelling_potential', 'unknown')}")
-                logger.info(f"   📈 Storytelling Potential: {topic.get('storytelling_potential', 'unknown')}")
+                if "topics" not in topics_data:
+                    print(f"❌ DEBUG: No 'topics' key in JSON: {topics_data}")
+                    logger.error(f"❌ No 'topics' key in JSON: {topics_data}")
+                    raise ValueError("Invalid JSON structure - missing 'topics' key")
                 
-                print(f"   DEBUG: Emotional Hooks: {len(topic.get('emotional_hooks', []))} hooks")
-                logger.info(f"   Emotional Hooks: {len(topic.get('emotional_hooks', []))} hooks")
+                topics = topics_data["topics"]
                 
-                for j, hook in enumerate(topic.get('emotional_hooks', []), 1):
-                    print(f"      {j}. {hook[:60]}{'...' if len(hook) > 60 else ''}")
-                    logger.info(f"      {j}. {hook[:60]}{'...' if len(hook) > 60 else ''}")
+                if not topics:
+                    print("❌ DEBUG: Empty topics list in JSON")
+                    logger.error("❌ Empty topics list in JSON")
+                    raise ValueError("Empty topics list")
                 
-                print("-" * 40)
-                logger.info("-" * 40)
-            
-            print("=" * 60)
-            logger.info("=" * 60)
-            
-            print(f"📊 DEBUG: TOPIC SUMMARY:")
-            logger.info(f"📊 TOPIC SUMMARY:")
-            print(f"   Total Topics: {len(topics)}")
-            logger.info(f"   Total Topics: {len(topics)}")
-            print(f"   High Controversy: {sum(1 for t in topics if t.get('controversy_level') == 'high')}")
-            logger.info(f"   High Controversy: {sum(1 for t in topics if t.get('controversy_level') == 'high')}")
-            print(f"   High Storytelling: {sum(1 for t in topics if t.get('storytelling_potential') == 'high')}")
-            logger.info(f"   High Storytelling: {sum(1 for t in topics if t.get('storytelling_potential') == 'high')}")
-            print(f"   Total Key Points: {sum(len(t.get('key_points', [])) for t in topics)}")
-            logger.info(f"   Total Key Points: {sum(len(t.get('key_points', [])) for t in topics)}")
-            print(f"   Total Quotes: {sum(len(t.get('quotes', [])) for t in topics)}")
-            logger.info(f"   Total Quotes: {sum(len(t.get('quotes', [])) for t in topics)}")
-            print(f"   Total Events: {sum(len(t.get('events', [])) for t in topics)}")
-            logger.info(f"   Total Events: {sum(len(t.get('events', [])) for t in topics)}")
-            print("=" * 60)
-            logger.info("=" * 60)
-            
-            return topics
-            
-        except json.JSONDecodeError as e:
-            print(f"❌ DEBUG: JSON parsing failed: {str(e)}")
-            logger.error(f"❌ JSON parsing failed: {str(e)}")
-            print(f"❌ DEBUG: Failed JSON content: {raw_response if 'raw_response' in locals() else 'No response'}")
-            logger.error(f"❌ Failed JSON content: {raw_response if 'raw_response' in locals() else 'No response'}")
-            # Fallback to basic topics
-            return self._create_fallback_topics(transcript)
-            
-        except Exception as e:
-            print(f"❌ DEBUG: Topic analysis failed: {str(e)}")
-            logger.error(f"❌ Topic analysis failed: {str(e)}")
-            print(f"❌ DEBUG: Full error details: {type(e).__name__}: {str(e)}")
-            logger.error(f"❌ Full error details: {type(e).__name__}: {str(e)}")
-            # Fallback to basic topics
-            return self._create_fallback_topics(transcript)
+                # ✅ NEW: Comprehensive topic logging with print statements
+                print(f"✅ DEBUG: Successfully extracted {len(topics)} topics from transcript")
+                logger.info(f"✅ Successfully extracted {len(topics)} topics from transcript")
+                
+                print("📋 DEBUG: TOPIC ANALYSIS RESULTS:")
+                logger.info("📋 TOPIC ANALYSIS RESULTS:")
+                print("=" * 60)
+                logger.info("=" * 60)
+                
+                for i, topic in enumerate(topics, 1):
+                    print(f"🎯 DEBUG: TOPIC {i}: {topic.get('title', 'No title')}")
+                    logger.info(f"🎯 TOPIC {i}: {topic.get('title', 'No title')}")
+                    
+                    print(f"   DEBUG: Key Points: {len(topic.get('key_points', []))} points")
+                    logger.info(f"   Key Points: {len(topic.get('key_points', []))} points")
+                    
+                    for j, point in enumerate(topic.get('key_points', []), 1):
+                        print(f"      {j}. {point[:100]}{'...' if len(point) > 100 else ''}")
+                        logger.info(f"      {j}. {point[:100]}{'...' if len(point) > 100 else ''}")
+                    
+                    print(f"   DEBUG: Quotes: {len(topic.get('quotes', []))} quotes")
+                    logger.info(f"    Quotes: {len(topic.get('quotes', []))} quotes")
+                    
+                    for j, quote in enumerate(topic.get('quotes', []), 1):
+                        print(f"      {j}. \"{quote[:80]}{'...' if len(quote) > 80 else ''}\"")
+                        logger.info(f"      {j}. \"{quote[:80]}{'...' if len(quote) > 80 else ''}\"")
+                    
+                    print(f"   📅 DEBUG: Events: {len(topic.get('events', []))} events")
+                    logger.info(f"    Events: {len(topic.get('events', []))} events")
+                    
+                    for j, event in enumerate(topic.get('events', []), 1):
+                        print(f"      {j}. {event[:80]}{'...' if len(event) > 80 else ''}")
+                        logger.info(f"      {j}. {event[:80]}{'...' if len(event) > 80 else ''}")
+                    
+                    print(f"   📖 DEBUG: Context: {topic.get('context', 'No context')[:100]}{'...' if len(topic.get('context', '')) > 100 else ''}")
+                    logger.info(f"   📖 Context: {topic.get('context', 'No context')[:100]}{'...' if len(topic.get('context', '')) > 100 else ''}")
+                    
+                    print(f"   DEBUG: Controversy Level: {topic.get('controversy_level', 'unknown')}")
+                    logger.info(f"   Controversy Level: {topic.get('controversy_level', 'unknown')}")
+                    
+                    print(f"   📈 DEBUG: Storytelling Potential: {topic.get('storytelling_potential', 'unknown')}")
+                    logger.info(f"   📈 Storytelling Potential: {topic.get('storytelling_potential', 'unknown')}")
+                    
+                    print(f"   DEBUG: Emotional Hooks: {len(topic.get('emotional_hooks', []))} hooks")
+                    logger.info(f"   Emotional Hooks: {len(topic.get('emotional_hooks', []))} hooks")
+                    
+                    for j, hook in enumerate(topic.get('emotional_hooks', []), 1):
+                        print(f"      {j}. {hook[:60]}{'...' if len(hook) > 60 else ''}")
+                        logger.info(f"      {j}. {hook[:60]}{'...' if len(hook) > 60 else ''}")
+                    
+                    print("-" * 40)
+                    logger.info("-" * 40)
+                
+                print("=" * 60)
+                logger.info("=" * 60)
+                
+                print(f"📊 DEBUG: TOPIC SUMMARY:")
+                logger.info(f"📊 TOPIC SUMMARY:")
+                print(f"   Total Topics: {len(topics)}")
+                logger.info(f"   Total Topics: {len(topics)}")
+                print(f"   High Controversy: {sum(1 for t in topics if t.get('controversy_level') == 'high')}")
+                logger.info(f"   High Controversy: {sum(1 for t in topics if t.get('controversy_level') == 'high')}")
+                print(f"   High Storytelling: {sum(1 for t in topics if t.get('storytelling_potential') == 'high')}")
+                logger.info(f"   High Storytelling: {sum(1 for t in topics if t.get('storytelling_potential') == 'high')}")
+                print(f"   Total Key Points: {sum(len(t.get('key_points', [])) for t in topics)}")
+                logger.info(f"   Total Key Points: {sum(len(t.get('key_points', [])) for t in topics)}")
+                print(f"   Total Quotes: {sum(len(t.get('quotes', [])) for t in topics)}")
+                logger.info(f"   Total Quotes: {sum(len(t.get('quotes', [])) for t in topics)}")
+                print(f"   Total Events: {sum(len(t.get('events', [])) for t in topics)}")
+                logger.info(f"   Total Events: {sum(len(t.get('events', [])) for t in topics)}")
+                print("=" * 60)
+                logger.info("=" * 60)
+                
+                return topics
+                
+            except json.JSONDecodeError as e:
+                print(f"❌ DEBUG: JSON parsing failed: {str(e)}")
+                logger.error(f"❌ JSON parsing failed: {str(e)}")
+                print(f"❌ DEBUG: Failed JSON content: {raw_response if 'raw_response' in locals() else 'No response'}")
+                logger.error(f"❌ Failed JSON content: {raw_response if 'raw_response' in locals() else 'No response'}")
+                # Fallback to basic topics
+                return self._create_fallback_topics(transcript)
+                
+            except Exception as e:
+                print(f"❌ DEBUG: Topic analysis attempt {attempt + 1} failed: {str(e)}")
+                if attempt == max_retries - 1:
+                    print("❌ DEBUG: All topic analysis attempts failed, using fallback")
+                    return self._create_fallback_topics(transcript)
+                await asyncio.sleep(2 ** attempt)  # Exponential backoff
     
     def _create_fallback_topics(self, transcript: str) -> List[Dict]:
         """Create fallback topics if analysis fails."""

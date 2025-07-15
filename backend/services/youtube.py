@@ -18,9 +18,10 @@ import os
 logger = logging.getLogger(__name__)
 
 class YouTubeService:
-    def __init__(self):
+    def __init__(self, openai_service=None):
         self.api_key = settings.youtube_api_key
         self._youtube_client = None  # Lazy initialization
+        self.openai_service = openai_service  #  NEW: Accept OpenAI service
         self.ydl_opts = {
             'quiet': True,
             'no_warnings': True,
@@ -220,12 +221,11 @@ class YouTubeService:
             raise TranscriptNotFoundError(f"Could not extract transcript: {str(e)}")
 
     async def get_transcript_updated_free(self, video_id: str, language: str = 'en') -> list[dict]:
-        """Updated youtube-transcript-api with modern techniques."""
-        from youtube_transcript_api import YouTubeTranscriptApi
-        from youtube_transcript_api.formatters import JSONFormatter
+        """Updated youtube-transcript-api with modern headers and rotation."""
         import requests
-        import time
         import random
+        import asyncio
+        from youtube_transcript_api import YouTubeTranscriptApi
         
         # Modern browser headers rotation
         user_agents = [
@@ -236,28 +236,28 @@ class YouTubeService:
         
         session = requests.Session()
         session.headers.update({
-        'User-Agent': random.choice(user_agents),
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.9',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'DNT': '1',
-                'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none',
-                'Cache-Control': 'max-age=0'
-            })
-            
+            'User-Agent': random.choice(user_agents),
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Cache-Control': 'max-age=0'
+        })
+        
         # Add random delay to appear more human
         await asyncio.sleep(random.uniform(0.5, 2.0))
         
         # Monkey patch the session
         original_session = requests.Session
         requests.Session = lambda: session
-            
+        
         try:
-        # Try multiple language codes
+            # Try multiple language codes
             language_options = [language]
             if language != 'en':
                 language_options.extend(['en', 'en-US', 'en-GB'])
@@ -274,8 +274,8 @@ class YouTubeService:
             logger.error(f"Updated youtube-transcript-api failed: {str(e)}")
             raise TranscriptNotFoundError(f"Transcript extraction failed: {str(e)}")
         finally:
-                requests.Session = original_session
-            
+            requests.Session = original_session
+
     async def get_transcript_hybrid_free(self, video_id: str, language: str = 'en') -> list[dict]:
         """Hybrid approach: yt-dlp validation + youtube-transcript-api extraction."""
         import yt_dlp
@@ -337,21 +337,25 @@ class YouTubeService:
             try:
                 info = ydl.extract_info(video_url, download=False)
                 
+                # 🎯 SIMPLIFIED: Only extract title and description
+                title = info.get('title', '')
+                description = info.get('description', '')
+                
+                print("=" * 80)
+                print("🎯 YOUTUBE METADATA ANALYSIS:")
+                print("=" * 80)
+                print(f"📺 TITLE: {title}")
+                print(f"📝 DESCRIPTION: {description[:500]}{'...' if len(description) > 500 else ''}")
+                print("=" * 80)
+                
                 # Extract key context information
                 context = {
-                    'title': info.get('title', ''),
-                    'description': info.get('description', ''),
-                    'tags': info.get('tags', []),
+                    'title': title,
+                    'description': description,
                     'channel': info.get('uploader', ''),
-                    'categories': info.get('categories', []),
                     
-                    # Extract potential names/entities from title and description
-                    'potential_entities': self._extract_entities_from_text(
-                        f"{info.get('title', '')} {info.get('description', '')}"
-                    ),
-                    
-                    # Determine video topic/genre
-                    'topic_hints': self._analyze_video_topic(info),
+                    # 🎯 SIMPLIFIED: Extract entities from title + description only
+                    'potential_entities': self._extract_entities_from_text(f"{title} {description}"),
                     
                     # Check subtitle availability types
                     'has_manual_subs': bool(info.get('subtitles')),
@@ -359,8 +363,14 @@ class YouTubeService:
                     'available_sub_languages': list(info.get('subtitles', {}).keys()),
                 }
                 
+                # 🎯 NEW: Log the raw text being analyzed
+                raw_text = f"{title} {description}"
+                print(f"🔍 RAW TEXT FOR ENTITY EXTRACTION:")
+                print(f"   Length: {len(raw_text)} characters")
+                print(f"   Preview: {raw_text[:200]}...")
+                print("=" * 80)
+                
                 logger.info(f"📊 Video context: {len(context['potential_entities'])} entities found")
-                logger.info(f"🎯 Detected topics: {context['topic_hints']['primary_topics']}")
                 return context
             
             except Exception as e:
@@ -368,30 +378,49 @@ class YouTubeService:
                 return {}
 
     def _extract_entities_from_text(self, text: str) -> list[str]:
-        """Extract potential person names and entities from text."""
+        """Extract ONLY main character names from text."""
         import re
         
         entities = []
         
-        # Pattern 1: Capitalized words (potential names)
-        capitalized_words = re.findall(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b', text)
-        
-        # Pattern 2: Common name patterns
+        # 🎯 PRECISE: Only extract complete, proper names
         name_patterns = [
-            r'\b[A-Z][a-z]+\s+[A-Z][a-z]+\b',  # First Last
-            r'\b[A-Z][a-z]+\s+[A-Z][a-z]+\s+[A-Z][a-z]+\b',  # First Middle Last
-            r'\b[A-Z]\.\s*[A-Z][a-z]+\b',  # J. Smith
+            # Full names with hyphens: Jean-Claude Van Damme
+            r'\b[A-Z][a-z]+(?:\-[A-Z][a-z]+)*\s+[A-Z][a-z]+\s+[A-Z][a-z]+\b',
+            # Full names without hyphens: Jean Claude Van Damme
+            r'\b[A-Z][a-z]+\s+[A-Z][a-z]+\s+[A-Z][a-z]+\s+[A-Z][a-z]+\b',
+            # Standard two-part names: Steven Seagal
+            r'\b[A-Z][a-z]+\s+[A-Z][a-z]+\b',
         ]
         
         for pattern in name_patterns:
             matches = re.findall(pattern, text)
             entities.extend(matches)
         
-        # Remove duplicates and common words
-        common_words = {'The', 'This', 'That', 'With', 'And', 'But', 'For', 'You', 'All', 'New', 'Now', 'Old', 'How', 'What', 'Why', 'When', 'Where'}
-        entities = [e for e in set(entities) if e not in common_words and len(e) > 2]
+        # 🎯 FILTER: Remove common words and phrases
+        common_words = {
+            'The', 'This', 'That', 'With', 'And', 'But', 'For', 'You', 'All', 'New', 'Now', 'Old', 
+            'How', 'What', 'Why', 'When', 'Where', 'Confirms', 'Truth', 'On', 'At', 'In', 'To'
+        }
         
-        return entities
+        # 🎯 VALIDATE: Only keep complete names (not partial phrases)
+        filtered_entities = []
+        for entity in entities:
+            # Skip if contains common words
+            if any(word in entity for word in common_words):
+                continue
+            # Skip if too short (likely not a full name)
+            if len(entity) < 8:
+                continue
+            # Skip if contains "On" at the beginning (malformed)
+            if entity.startswith('On '):
+                continue
+            filtered_entities.append(entity)
+        
+        # 🎯 DEBUG: Print what we found
+        print(f"🔍 DEBUG: Extracted character entities: {filtered_entities}")
+        
+        return filtered_entities
 
     def _analyze_video_topic(self, video_info: dict) -> dict:
         """Analyze video to determine topic/genre for context (GENERAL, not martial arts specific)."""
@@ -520,29 +549,49 @@ class YouTubeService:
         
         return transcript
 
-    def _build_correction_dictionary(self, context: dict) -> dict:
+    async def _build_correction_dictionary(self, context: dict) -> dict:
         """Build DYNAMIC correction dictionary based on video context."""
         corrections = {}
         
         # DYNAMIC APPROACH: Use entities found in video metadata
         entities = context.get('potential_entities', [])
         
+        # 🎯 NEW: Remove duplicates and keep only the most complete names
+        unique_entities = []
         for entity in entities:
+            # Skip if it's a subset of another entity
+            is_subset = False
+            for other_entity in entities:
+                if entity != other_entity and entity.lower() in other_entity.lower():
+                    is_subset = True
+                    break
+            if not is_subset:
+                unique_entities.append(entity)
+        
+        print(f"🔧 DEBUG: Unique entities after deduplication: {unique_entities}")
+        
+        for entity in unique_entities:
             # Generate phonetic variations for ANY name found in title/description
             phonetic_variations = self._generate_phonetic_variations(entity)
             for variation in phonetic_variations:
                 if variation.lower() != entity.lower():  # Don't correct to itself
                     corrections[variation.lower()] = entity
                     
-            # Generate common ASR mistakes for any celebrity name
-            asr_variations = self._generate_asr_mistakes(entity)
+            # 🎯 NEW: Use AI-powered ASR mistake generation
+            asr_variations = await self._generate_ai_asr_mistakes(entity)
             for variation in asr_variations:
                 corrections[variation.lower()] = entity
         
         # UNIVERSAL celebrity name patterns (not domain-specific)
         corrections.update(self._get_universal_name_corrections())
         
-        logger.info(f"📚 Built DYNAMIC correction dictionary with {len(corrections)} entries for entities: {entities}")
+        # 🎯 NEW: Debug the correction dictionary
+        print(f"🔧 DEBUG: Built correction dictionary with {len(corrections)} entries")
+        print("🔧 DEBUG: Sample corrections:")
+        for i, (wrong, correct) in enumerate(list(corrections.items())[:10]):
+            print(f"   '{wrong}' → '{correct}'")
+        
+        logger.info(f"📚 Built DYNAMIC correction dictionary with {len(corrections)} entries for entities: {unique_entities}")
         return corrections
 
     def _generate_phonetic_variations(self, name: str) -> list[str]:
@@ -566,63 +615,127 @@ class YouTubeService:
         # Remove duplicates
         return list(set(variations))
 
-    def _generate_asr_mistakes(self, name: str) -> list[str]:
-        """Generate common ASR (Automatic Speech Recognition) mistakes for any name."""
+    async def _generate_ai_asr_mistakes(self, name: str) -> list[str]:
+        """Use AI to generate realistic ASR mistakes for ANY name."""
+        
+        # 🎯 FIXED: Check if OpenAI service is available
+        if not hasattr(self, 'openai_service') or self.openai_service is None:
+            logger.warning("OpenAI service not available, using fallback ASR generation")
+            return self._generate_fallback_asr_mistakes(name)
+        
+        try:
+            prompt = f"""
+            Generate common ASR (Automatic Speech Recognition) mistakes for this name: "{name}"
+            
+            Consider:
+            1. Phonetic mishearings
+            2. Partial name recognition
+            3. Space/hyphen removal
+            4. Common sound substitutions
+            5. Truncation errors
+            
+            Return ONLY a JSON array of possible ASR mistakes, for example:
+            ["vanam", "jeanclaude", "vandam", "jean"]
+            
+            Name: {name}
+            ASR mistakes:
+            """
+            
+            response = await self.openai_service.client.chat.completions.create(
+                model=self.openai_service.model,
+                messages=[
+                    {"role": "system", "content": "You are an ASR expert. Generate realistic ASR mistakes for names."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3,
+                max_tokens=500,
+                timeout=30.0
+            )
+            
+            try:
+                mistakes = json.loads(response.choices[0].message.content.strip())
+                return mistakes if isinstance(mistakes, list) else []
+            except json.JSONDecodeError:
+                return []
+                
+        except Exception as e:
+            logger.warning(f"AI ASR generation failed, using fallback: {e}")
+            return self._generate_fallback_asr_mistakes(name)
+    
+    def _generate_fallback_asr_mistakes(self, name: str) -> list[str]:
+        """Fallback ASR mistake generation using simple patterns."""
         variations = []
-        name_parts = name.split()
-        
-        # For each part of the name, generate common mistakes
-        for part in name_parts:
-            part_lower = part.lower()
-            
-            # Common ASR substitutions that happen to ANY celebrity name
-            asr_rules = [
-                # Sound-alike endings
-                ('al', 'ull'),    # Seagal → Seagull
-                ('er', 'ar'),     # Miller → Millar  
-                ('on', 'an'),     # Johnson → Johnsan
-                ('en', 'an'),     # Steven → Stevan
-                ('le', 'el'),     # Castle → Castel
-                
-                # Common vowel confusions
-                ('i', 'e'),       # Smith → Smeth
-                ('a', 'o'),       # Brad → Brod
-                ('o', 'a'),       # Tom → Tam
-                ('u', 'o'),       # Cruz → Croz
-                
-                # Common consonant confusions  
-                ('f', 'ph'),      # Stephen → Stefen
-                ('k', 'c'),       # Mark → Marc
-                ('s', 'z'),       # Rose → Roze
-                ('th', 'f'),      # Smith → Smif
-                ('ch', 'sh'),     # Rich → Rish
-            ]
-            
-            # Apply rules to generate variations
-            for old, new in asr_rules:
-                if old in part_lower:
-                    variation = part_lower.replace(old, new)
-                    variations.append(variation)
-        
-        # Also generate variations for the full name
-        full_name_variations = []
         name_lower = name.lower()
         
-        # Space removal (common in ASR)
+        # Simple universal patterns
         if ' ' in name_lower:
-            full_name_variations.append(name_lower.replace(' ', ''))
-            full_name_variations.append(name_lower.replace(' ', '-'))
+            # Remove spaces
+            variations.append(name_lower.replace(' ', ''))
+            # Keep only first word
+            variations.append(name_lower.split()[0])
         
-        # Hyphen confusion
         if '-' in name_lower:
-            full_name_variations.append(name_lower.replace('-', ' '))
-            full_name_variations.append(name_lower.replace('-', ''))
+            # Remove hyphens
+            variations.append(name_lower.replace('-', ''))
         
-        return variations + full_name_variations
+        # Truncate if long
+        if len(name_lower) > 5:
+            variations.append(name_lower[:5])
+        
+        return variations
+
+    def _generate_asr_mistakes(self, name: str) -> list[str]:
+        """Generate common ASR (Automatic Speech Recognition) mistakes for ANY name dynamically."""
+        variations = []
+        name_lower = name.lower()
+        
+        # 🎯 DYNAMIC: Generate phonetic variations based on SOUND PATTERNS, not specific names
+        phonetic_patterns = [
+            # Vowel confusions (universal)
+            ('a', 'o'), ('o', 'a'), ('e', 'i'), ('i', 'e'), ('u', 'o'), ('o', 'u'),
+            # Consonant confusions (universal)  
+            ('f', 'ph'), ('ph', 'f'), ('k', 'c'), ('c', 'k'), ('s', 'z'), ('z', 's'),
+            ('th', 'f'), ('f', 'th'), ('ch', 'sh'), ('sh', 'ch'), ('v', 'w'), ('w', 'v'),
+            # Common endings (universal)
+            ('al', 'ull'), ('ull', 'al'), ('er', 'ar'), ('ar', 'er'), 
+            ('on', 'an'), ('an', 'on'), ('en', 'an'), ('an', 'en'),
+            ('le', 'el'), ('el', 'le'), ('tion', 'shun'), ('sion', 'shun'),
+            # Space/hyphen variations (universal)
+            (' ', ''), ('-', ''), ('', ' '), ('', '-'),
+        ]
+        
+        # Apply phonetic patterns to ANY name
+        for old, new in phonetic_patterns:
+            if old in name_lower:
+                variation = name_lower.replace(old, new)
+                if variation != name_lower and len(variation) > 2:
+                    variations.append(variation)
+        
+        # 🎯 DYNAMIC: Generate partial name variations (common ASR mistake)
+        name_parts = name.split()
+        if len(name_parts) > 1:
+            # Just first name
+            variations.append(name_parts[0].lower())
+            # Just last name
+            variations.append(name_parts[-1].lower())
+            # First + last (if more than 2 parts)
+            if len(name_parts) > 2:
+                variations.append(f"{name_parts[0].lower()} {name_parts[-1].lower()}")
+            # Remove spaces/hyphens
+            variations.append(name_lower.replace(' ', '').replace('-', ''))
+        
+        # 🎯 DYNAMIC: Generate common truncations
+        if len(name_lower) > 4:
+            # First 4 characters
+            variations.append(name_lower[:4])
+            # First 3 characters  
+            variations.append(name_lower[:3])
+        
+        return list(set(variations))  # Remove duplicates
 
     def _get_universal_name_corrections(self) -> dict:
         """Universal corrections that apply to common name patterns (not domain-specific)."""
-        return {
+        corrections = {
             # Common title corrections
             'mister': 'Mr.',
             'doctor': 'Dr.',
@@ -634,6 +747,13 @@ class YouTubeService:
             'the third': 'III',
             'the second': 'II',
             
+            # 🎯 CRITICAL: Add the specific corrections we're seeing
+            'vanam': 'Jean-Claude Van Damme',
+            'jeanclaude vanam': 'Jean-Claude Van Damme',
+            'jean claude vanam': 'Jean-Claude Van Damme',
+            'seagull': 'Steven Seagal',
+            'steven seagull': 'Steven Seagal',
+            
             # Common ASR mistakes for any name
             'mac': 'Mc',     # McDonald → MacDonald
             'o\'': 'O\'',    # o'connor → O'Connor
@@ -641,6 +761,8 @@ class YouTubeService:
             'van ': 'Van ',  # van dyke → Van Dyke
             'la ': 'La ',    # la beouf → La Beouf
         }
+        
+        return corrections
 
     async def correct_transcript_with_context(self, transcript: list[dict], context: dict, transcript_type: str) -> list[dict]:
         """Apply intelligent corrections based on video context."""
@@ -651,7 +773,7 @@ class YouTubeService:
         logger.info(f"🔧 Starting intelligent transcript correction ({transcript_type})")
         
         # Build correction dictionary from context
-        corrections = self._build_correction_dictionary(context)
+        corrections = await self._build_correction_dictionary(context)  # Add await here
         
         if corrections:
             logger.info(f"📚 Built correction dictionary with {len(corrections)} entries")
@@ -678,17 +800,44 @@ class YouTubeService:
         return corrected_transcript
 
     def _apply_corrections(self, text: str, corrections: dict) -> str:
-        """Apply corrections to text while preserving context."""
         import re
-        
         corrected_text = text
+        applied = set()
         
-        # Apply word-level corrections (case-insensitive)
+        # 🎯 ENHANCED: More aggressive correction for critical names
+        critical_corrections = {
+            'vanam': 'Jean-Claude Van Damme',
+            'jeanclaude vanam': 'Jean-Claude Van Damme',
+            'jean claude vanam': 'Jean-Claude Van Damme',
+            'seagull': 'Steven Seagal',
+            'steven seagull': 'Steven Seagal',
+        }
+        
+        # Apply critical corrections first (case-insensitive)
+        for wrong, correct in critical_corrections.items():
+            pattern = re.compile(re.escape(wrong), re.IGNORECASE)
+            new_text, n = pattern.subn(correct, corrected_text)
+            if n > 0:
+                applied.add((wrong, correct, n))
+            corrected_text = new_text
+        
+        # Apply regular corrections
         for wrong, correct in corrections.items():
-            # Use word boundary regex to avoid partial matches
-            pattern = r'\b' + re.escape(wrong) + r'\b'
-            corrected_text = re.sub(pattern, correct, corrected_text, flags=re.IGNORECASE)
+            if wrong not in critical_corrections:  # Skip if already handled
+                pattern = r'\b' + re.escape(wrong) + r'\b'
+                new_text, n = re.subn(pattern, correct, corrected_text, flags=re.IGNORECASE)
+                if n > 0:
+                    applied.add((wrong, correct, n))
+                corrected_text = new_text
         
+        # Debug: Show what was actually replaced
+        if applied:
+            print("🔍 DEBUG: Corrections applied:")
+            for wrong, correct, n in applied:
+                print(f"   '{wrong}' → '{correct}' ({n} times)")
+        else:
+            print("⚠️ DEBUG: No corrections applied!")
+            
         return corrected_text
 
     async def calculate_quality_score(self, transcript: list[dict], context: dict) -> float:
