@@ -247,16 +247,16 @@ Provide only the connecting text (can be empty if contexts connect naturally).
                 raise  # Re-raise the original error
     
     def _calculate_optimal_tokens(self, transcript: str) -> int:
-        """Calculate optimal max_tokens based on transcript length and GPT-4o limits."""
-        # Rough estimation: 1 token ≈ 4 characters
-        input_tokens = len(transcript) // 4
+        """Calculate optimal token count for script generation."""
         
-        # GPT-4o limits: 16,384 completion tokens max, 128,000 total context
-        MAX_COMPLETION_TOKENS = 16000  # Conservative (16,384 - buffer)
-        MAX_CONTEXT_TOKENS = 125000    # Conservative (128,000 - buffer)
+        # Estimate input tokens (transcript + prompt overhead)
+        input_tokens = len(transcript) // 4  # Rough estimate: 4 chars per token
+        prompt_overhead = 2000  # Estimated tokens for system/user messages
         
-        # Estimate prompt tokens (system message + user prompt template)
-        prompt_overhead = 800  # Larger prompt from prompts.md
+        # GPT-4o context limits
+        MAX_CONTEXT_TOKENS = 128000
+        MAX_COMPLETION_TOKENS = 4096
+        
         available_context = MAX_CONTEXT_TOKENS - prompt_overhead
         
         if input_tokens > available_context:

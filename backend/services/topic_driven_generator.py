@@ -168,6 +168,9 @@ class TopicDrivenScriptGenerator:
         if video_id:
             script = await self._apply_dynamic_name_corrections(script, video_id)
         
+        # 🎯 NEW: Step 2: Clean TTS-unfriendly characters
+        script = self._clean_tts_characters(script)
+        
         # 🎯 TEMPORARILY DISABLED: AI vocabulary simplification (causing truncation)
         # script = await self._apply_ai_vocabulary_simplification(script)
         
@@ -176,6 +179,112 @@ class TopicDrivenScriptGenerator:
         script = script.strip()
         
         logger.info("✅ Post-processing complete")
+        return script
+
+    def _clean_tts_characters(self, script: str) -> str:
+        """Intelligently clean script of TTS-unfriendly characters and symbols."""
+        logger.info("🔧 Applying intelligent TTS character cleanup...")
+        
+        # Track what we're cleaning for logging
+        cleaned_chars = {}
+        original_script = script
+        
+        # INTELLIGENT REPLACEMENTS: Only replace when actually problematic
+        
+        # 1. Social media symbols (TTS engines struggle with these)
+        if '#' in script:
+            count = script.count('#')
+            script = re.sub(r'#(\w+)', r'hashtag \1', script)  # #EpicFight -> hashtag EpicFight
+            cleaned_chars['#'] = count
+        
+        if '@' in script:
+            count = script.count('@')
+            script = re.sub(r'@(\w+)', r'at \1', script)  # @VanDamme -> at VanDamme
+            cleaned_chars['@'] = count
+        
+        # 2. Technical symbols (TTS engines can't pronounce these)
+        if '\\' in script:
+            count = script.count('\\')
+            script = script.replace('\\', ' backslash ')
+            cleaned_chars['\\'] = count
+        
+        if '|' in script:
+            count = script.count('|')
+            script = script.replace('|', ' or ')
+            cleaned_chars['|'] = count
+        
+        if '^' in script:
+            count = script.count('^')
+            script = script.replace('^', ' caret ')
+            cleaned_chars['^'] = count
+        
+        if '~' in script:
+            count = script.count('~')
+            script = script.replace('~', ' tilde ')
+            cleaned_chars['~'] = count
+        
+        if '`' in script:
+            count = script.count('`')
+            script = script.replace('`', ' backtick ')
+            cleaned_chars['`'] = count
+        
+        # 3. Mathematical symbols (context-dependent)
+        if '=' in script:
+            # Only replace if it's not part of a natural expression
+            if re.search(r'\d+\s*=\s*\d+', script):  # Mathematical equation
+                count = script.count('=')
+                script = re.sub(r'(\d+)\s*=\s*(\d+)', r'\1 equals \2', script)
+                cleaned_chars['='] = count
+        
+        if '<' in script or '>' in script:
+            # Only replace if they're comparison operators, not HTML tags
+            if re.search(r'\d+\s*[<>]\s*\d+', script):
+                count = script.count('<') + script.count('>')
+                script = re.sub(r'(\d+)\s*<\s*(\d+)', r'\1 less than \2', script)
+                script = re.sub(r'(\d+)\s*>\s*(\d+)', r'\1 greater than \2', script)
+                cleaned_chars['<>'] = count
+        
+        # 4. Abbreviations that TTS might mispronounce (FIXED regex patterns)
+        script = re.sub(r'\bMr\.', 'Mister', script)
+        script = re.sub(r'\bDr\.', 'Doctor', script)
+        script = re.sub(r'\bProf\.', 'Professor', script)
+        script = re.sub(r'\bvs\.', 'versus', script)  # FIXED: Removed \b at end
+        script = re.sub(r'\betc\.', 'and so on', script)  # FIXED: Removed \b at end
+        
+        # 5. Number abbreviations (only when they're not natural)
+        # Don't replace 20k if it's in a natural context like "20k followers"
+        # But do replace technical abbreviations like "1080p"
+        script = re.sub(r'\b(\d+)k\b(?=\s+(?:followers|subscribers|views|fans))', r'\1 thousand', script, flags=re.IGNORECASE)
+        script = re.sub(r'\b(\d+)m\b(?=\s+(?:followers|subscribers|views|fans))', r'\1 million', script, flags=re.IGNORECASE)
+        
+        # 6. Technical specifications (these need cleanup)
+        script = re.sub(r'\b(\d+)p\b', r'\1 p', script)  # 1080p -> 1080 p
+        script = re.sub(r'\b(\d+)fps\b', r'\1 fps', script)  # 60fps -> 60 fps
+        
+        # 🎯 PRESERVE NATURAL CHARACTERS: Don't replace these as TTS handles them well
+        # $ - TTS reads "dollar" naturally
+        # % - TTS reads "percent" naturally  
+        # & - TTS reads "and" naturally
+        # + - TTS reads "plus" naturally
+        # / - TTS reads "slash" naturally
+        # * - TTS reads "asterisk" naturally
+        
+        # Clean up extra spaces created by replacements
+        script = re.sub(r'\s+', ' ', script)
+        
+        # Log cleanup statistics
+        if cleaned_chars:
+            logger.info(f"🔧 Intelligent TTS cleanup applied: {cleaned_chars}")
+            print(f" DEBUG: Intelligent TTS cleanup applied: {cleaned_chars}")
+        else:
+            logger.info("✅ No problematic TTS characters found")
+            print("✅ DEBUG: No problematic TTS characters found")
+        
+        # Validate no content was lost
+        if len(script) < len(original_script) * 0.9:  # If more than 10% was lost
+            logger.warning("⚠️ TTS cleanup may have removed too much content, using original")
+            return original_script
+        
         return script
 
     async def generate_script(self, transcript: str, video_id: str = None) -> str:
@@ -599,13 +708,13 @@ class TopicDrivenScriptGenerator:
         return valid_sections
     
     async def _generate_single_topic_section(self, plan: Dict) -> str:
-        """Generate a single topic section with focused prompt."""
+        """Generate a single topic section optimized for TTS."""
         
         topic = plan["topic"]
         engagement = plan["engagement_requirements"]
         style = plan["style_requirements"]
         
-        # 🎯 FIXED: Pre-define the problematic string to avoid f-string backslash issue
+        # 🎯 TTS-OPTIMIZED: Pre-define the problematic string to avoid f-string backslash issue
         transitions_text = "- Use smooth transitions that build anticipation for what's coming next"
         
         section_prompt = f"""
@@ -618,6 +727,14 @@ class TopicDrivenScriptGenerator:
         QUOTES: {', '.join(topic['quotes'])}
         EVENTS: {', '.join(topic['events'])}
         CONTEXT: {topic['context']}
+        
+        🎯 TTS OPTIMIZATION REQUIREMENTS:
+        - Use simple, clear vocabulary that sounds natural when spoken
+        - Keep sentences under 20 words for easy comprehension
+        - Use active voice and direct language
+        - Avoid complex sentence structures and run-on sentences
+        - Use natural speech patterns and conversational flow
+        - Break complex ideas into shorter, digestible sentences
         
         ENGAGEMENT TECHNIQUES TO INCLUDE:
         {'- Open with a powerful hook that immediately grabs attention' if engagement['hook_required'] else ''}
@@ -632,6 +749,14 @@ class TopicDrivenScriptGenerator:
         {'- Slightly mysterious and intriguing where appropriate' if style['mysterious_intriguing'] else ''}
         - Authentic and relatable, avoiding robotic or formulaic language
         {'- Dynamic pacing that speeds up and slows down for dramatic effect' if style['dynamic_pacing'] else ''}
+        
+        🎯 TTS LANGUAGE GUIDELINES:
+        - Use simple words: "show" instead of "demonstrate", "help" instead of "facilitate"
+        - Use natural speech patterns: "And then..." "But here's the thing..."
+        - Avoid overly formal or academic language
+        - Use repetition and emphasis for dramatic effect
+        - Keep paragraphs short (2-3 sentences max)
+        - Use direct, accessible language throughout
         
         PHRASING, DRAMATIC LANGUAGE, AND CENSORSHIP:
         - Use powerful, engaging language, like "shocking," "exposed," or "revealed," to hold the viewer's attention
@@ -648,7 +773,7 @@ class TopicDrivenScriptGenerator:
         
         FORMAT: Write in paragraph form with no "movie director" language. Avoid phrases like "[Cut to shot of…]" or stage directions, and write as though it's a story told in a straightforward, engaging way. NO SECTION HEADINGS - just flowing narrative paragraphs.
         
-        Write this narrative section now:
+        Write this TTS-optimized narrative section now:
         """
         
         # 🎯 FIXED: Calculate proper token limit for GPT-4o
@@ -657,7 +782,7 @@ class TopicDrivenScriptGenerator:
         response = await self.openai_service.client.chat.completions.create(
             model=self.openai_service.model,
             messages=[
-                {"role": "system", "content": "You are an expert script writer creating focused, engaging narrative content without section headings."},
+                {"role": "system", "content": "You are an expert script writer creating TTS-optimized, engaging narrative content without section headings."},
                 {"role": "user", "content": section_prompt}
             ],
             temperature=0.7,
@@ -668,16 +793,29 @@ class TopicDrivenScriptGenerator:
         return response.choices[0].message.content.strip()
     
     async def _generate_fallback_section(self, plan: Dict) -> str:
-        """Generate a fallback section if main generation fails."""
+        """Generate a TTS-optimized fallback section if main generation fails."""
         topic = plan["topic"]
         
         fallback_prompt = f"""
-        Create a simple narrative section for this topic:
+        Create a TTS-optimized narrative section for this topic:
         
         TOPIC: {topic['title']}
         CONTEXT: {topic['context']}
         
-        Write a {plan['target_length']} character section in engaging, conversational style.
+        🎯 TTS OPTIMIZATION REQUIREMENTS:
+        - Use simple, clear vocabulary that sounds natural when spoken
+        - Keep sentences under 20 words for easy comprehension
+        - Use active voice and direct language
+        - Use natural speech patterns and conversational flow
+        - Break complex ideas into shorter, digestible sentences
+        
+        🎯 TTS LANGUAGE GUIDELINES:
+        - Use simple words: "show" instead of "demonstrate", "help" instead of "facilitate"
+        - Use natural speech patterns: "And then..." "But here's the thing..."
+        - Avoid overly formal or academic language
+        - Keep paragraphs short (2-3 sentences max)
+        
+        Write a {plan['target_length']} character section in engaging, conversational style optimized for TTS.
         NO SECTION HEADINGS - just flowing narrative paragraphs.
         """
         
@@ -687,7 +825,7 @@ class TopicDrivenScriptGenerator:
         response = await self.openai_service.client.chat.completions.create(
             model=self.openai_service.model,
             messages=[
-                {"role": "system", "content": "You are a script writer creating engaging narrative content without headings."},
+                {"role": "system", "content": "You are a script writer creating TTS-optimized, engaging narrative content without headings."},
                 {"role": "user", "content": fallback_prompt}
             ],
             temperature=0.7,
@@ -771,67 +909,235 @@ class TopicDrivenScriptGenerator:
         logger.info(f"✅ Final script complete: {len(final_script)} characters")
         return final_script
 
+    def _apply_rule_based_polish(self, script: str) -> str:
+        """Apply rule-based polishing when AI polishing fails."""
+        logger.info("🔧 Applying rule-based polish fallback")
+        
+        # Initialize TTS optimizer
+        tts_optimizer = TTSScriptOptimizer()
+        
+        # Apply rule-based optimizations
+        polished_script = tts_optimizer.optimize_for_tts(script)
+        
+        logger.info("✅ Rule-based polish complete")
+        return polished_script
+
     async def _polish_large_script(self, script: str) -> str:
         """Polish large scripts by processing in chunks with improved error handling."""
         print("🔧 DEBUG: Starting chunked polish for large script")
         logger.info("🔧 Starting chunked polish for large script")
         
-        # 🎯 SIMPLIFIED: Use simple chunking without overlap to avoid complexity
-        chunk_size = 12000  # Reduced from 15000
+        # 🎯 IMPROVED: Better chunking strategy
+        chunk_size = 8000  # Reduced for better reliability
         chunks = [script[i:i+chunk_size] for i in range(0, len(script), chunk_size)]
         
-        polished_chunks = []
-        for i, chunk in enumerate(chunks):
-            print(f"🔧 DEBUG: Polishing chunk {i+1}/{len(chunks)}")
-            logger.info(f"🔧 Polishing chunk {i+1}/{len(chunks)}")
-            
-            try:
-                chunk_prompt = f"""
-                Polish this script chunk to improve flow and coherence.
-                IMPORTANT: Return ONLY the polished text, no explanations or additional text.
-                
-                {chunk}
-                
-                Polished version:
-                """
-                
-                response = await self.openai_service.client.chat.completions.create(
-                    model=self.openai_service.model,
-                    messages=[
-                        {"role": "system", "content": "You are an expert script editor. Return only polished text."},
-                        {"role": "user", "content": chunk_prompt}
-                    ],
-                    temperature=0.3,  # Reduced for consistency
-                    max_tokens=12000,  # Increased to handle full chunk
-                    timeout=45.0  # Increased timeout
-                )
-                
-                polished_chunk = response.choices[0].message.content.strip()
-                
-                # 🎯 FIXED: Validate chunk was actually polished
-                if len(polished_chunk) < len(chunk) * 0.5:  # If chunk was severely truncated
-                    print(f"⚠️ DEBUG: Chunk {i+1} appears truncated, using original")
-                    logger.warning(f"⚠️ Chunk {i+1} appears truncated, using original")
-                    polished_chunk = chunk
-                
-                polished_chunks.append(polished_chunk)
-                
-            except Exception as e:
-                print(f"⚠️ DEBUG: Chunk {i+1} polish failed, using original: {str(e)}")
-                logger.warning(f"⚠️ Chunk {i+1} polish failed, using original: {str(e)}")
-                polished_chunks.append(chunk)
+        print(f"🔧 DEBUG: Split into {len(chunks)} chunks of ~{chunk_size} characters each")
+        logger.info(f" Split into {len(chunks)} chunks of ~{chunk_size} characters each")
         
-        # 🎯 SIMPLIFIED: Simple concatenation without complex overlap removal
+        polished_chunks = []
+        failed_chunks = 0
+        
+        for i, chunk in enumerate(chunks):
+            print(f"🔧 DEBUG: Polishing chunk {i+1}/{len(chunks)} ({len(chunk)} characters)")
+            logger.info(f" Polishing chunk {i+1}/{len(chunks)} ({len(chunk)} characters)")
+            
+            #  IMPROVED: Enhanced prompt for better AI polishing
+            chunk_prompt = f"""
+            Polish this script chunk to make it more engaging and TTS-friendly.
+            
+            SPECIFIC IMPROVEMENTS TO MAKE:
+            1. Simplify complex sentences (break long sentences into shorter ones)
+            2. Replace sophisticated vocabulary with simpler, more natural words
+            3. Improve flow and transitions between ideas
+            4. Make the language more conversational and engaging
+            5. Ensure proper pacing for voice narration
+            
+            IMPORTANT: Return ONLY the polished text, no explanations or additional text.
+            
+            SCRIPT CHUNK TO POLISH:
+            {chunk}
+            
+            POLISHED VERSION:
+            """
+            
+            # 🎯 IMPROVED: Retry logic for failed chunks
+            max_retries = 2
+            polished_chunk = None
+            
+            for attempt in range(max_retries):
+                try:
+                    print(f" DEBUG: Chunk {i+1} attempt {attempt + 1}/{max_retries}")
+                    
+                    response = await self.openai_service.client.chat.completions.create(
+                        model=self.openai_service.model,
+                        messages=[
+                            {"role": "system", "content": "You are an expert script editor specializing in TTS optimization. Your job is to make scripts more engaging, natural, and easy to read aloud. Return only the polished text."},
+                            {"role": "user", "content": chunk_prompt}
+                        ],
+                        temperature=0.4,  # Slightly higher for more creative improvements
+                        max_tokens=10000,  # Reduced for reliability
+                        timeout=60.0  # Increased timeout significantly
+                    )
+                    
+                    polished_chunk = response.choices[0].message.content.strip()
+                    
+                    # 🎯 IMPROVED: Better validation logic
+                    if not polished_chunk or len(polished_chunk.strip()) == 0:
+                        raise ValueError("Empty response from AI")
+                    
+                    if len(polished_chunk) < len(chunk) * 0.3:  # More reasonable minimum
+                        raise ValueError(f"Chunk too short: {len(polished_chunk)} vs {len(chunk)}")
+                    
+                    if len(polished_chunk) > len(chunk) * 2.0:  # Prevent excessive expansion
+                        print(f"⚠️ DEBUG: Chunk {i+1} too long, truncating")
+                        polished_chunk = polished_chunk[:len(chunk) * 2]
+                    
+                    print(f"✅ DEBUG: Chunk {i+1} polished successfully ({len(polished_chunk)} characters)")
+                    break
+                    
+                except Exception as e:
+                    print(f"⚠️ DEBUG: Chunk {i+1} attempt {attempt + 1} failed: {str(e)}")
+                    logger.warning(f"⚠️ Chunk {i+1} attempt {attempt + 1} failed: {str(e)}")
+                    
+                    if attempt == max_retries - 1:  # Last attempt
+                        print(f"❌ DEBUG: Chunk {i+1} all attempts failed, using rule-based fallback")
+                        logger.error(f"❌ Chunk {i+1} all attempts failed, using rule-based fallback")
+                        polished_chunk = self._apply_rule_based_polish(chunk)
+                        failed_chunks += 1
+        
+            polished_chunks.append(polished_chunk)
+        
+        # 🎯 IMPROVED: Better chunk assembly
+        print(f"🔧 DEBUG: Assembling {len(polished_chunks)} chunks")
+        logger.info(f"🔧 Assembling {len(polished_chunks)} chunks")
+        
+        # Simple concatenation with proper spacing
         final_script = " ".join(polished_chunks)
         
-        # 🎯 FIXED: Validate final script integrity
-        if len(final_script) < len(script) * 0.8:  # If we lost more than 20%
+        # 🎯 IMPROVED: Final validation and cleanup
+        if len(final_script) < len(script) * 0.7:  # More reasonable minimum
             print(f"⚠️ DEBUG: Final script too short ({len(final_script)} vs {len(script)}), using original")
             logger.warning(f"⚠️ Final script too short, using original")
             final_script = script
         
-        final_script = text_cleaner.clean_for_voice(final_script)
+        # Clean up extra whitespace
+        final_script = re.sub(r'\s+', ' ', final_script).strip()
         
-        print(f"🔧 DEBUG: Chunked polish complete: {len(final_script)} characters")
-        logger.info(f"🔧 Chunked polish complete: {len(final_script)} characters")
+        # Log results
+        success_rate = ((len(chunks) - failed_chunks) / len(chunks)) * 100
+        print(f"🔧 DEBUG: Chunked polish complete: {len(final_script)} characters, {success_rate:.1f}% success rate")
+        logger.info(f"🔧 Chunked polish complete: {len(final_script)} characters, {success_rate:.1f}% success rate")
+        
+        if failed_chunks > 0:
+            print(f"⚠️ DEBUG: {failed_chunks} chunks failed and used fallback polishing")
+            logger.warning(f"⚠️ {failed_chunks} chunks failed and used fallback polishing")
+        
         return final_script
+
+class TTSScriptOptimizer:
+    """Rule-based TTS optimization without AI dependencies."""
+    
+    def __init__(self):
+        # Vocabulary simplification rules
+        self.complex_word_mappings = {
+            'consequently': 'so',
+            'nevertheless': 'but',
+            'furthermore': 'also',
+            'subsequently': 'then',
+            'approximately': 'about',
+            'demonstrate': 'show',
+            'utilize': 'use',
+            'facilitate': 'help',
+            'implement': 'put in place',
+            'methodology': 'method',
+            'paradigm': 'approach',
+            'sophisticated': 'complex',
+            'elaborate': 'detailed',
+            'comprehensive': 'complete',
+            'substantial': 'large',
+            'significant': 'important',
+            'considerable': 'big',
+            'extensive': 'wide',
+            'profound': 'deep',
+            'remarkable': 'amazing'
+        }
+        
+        # Sentence structure rules
+        self.sentence_breakers = [
+            r'([.!?])\s+([A-Z])',  # Break on sentence endings
+            r'([,;])\s+(however|but|yet|still|though|although)',  # Break on conjunctions
+            r'([,;])\s+(furthermore|moreover|additionally|also)',  # Break on additions
+        ]
+    
+    def optimize_for_tts(self, script: str) -> str:
+        """Apply comprehensive TTS optimization rules."""
+        
+        # Step 1: Simplify complex vocabulary
+        script = self._simplify_vocabulary(script)
+        
+        # Step 2: Break long sentences
+        script = self._break_long_sentences(script)
+        
+        # Step 3: Optimize punctuation for speech
+        script = self._optimize_punctuation(script)
+        
+        # Step 4: Handle numbers and dates
+        script = self._optimize_numbers_and_dates(script)
+        
+        return script
+    
+    def _simplify_vocabulary(self, script: str) -> str:
+        """Replace complex words with simpler alternatives."""
+        for complex_word, simple_word in self.complex_word_mappings.items():
+            # Use word boundaries to avoid partial matches
+            pattern = r'\b' + re.escape(complex_word) + r'\b'
+            script = re.sub(pattern, simple_word, script, flags=re.IGNORECASE)
+        return script
+    
+    def _break_long_sentences(self, script: str) -> str:
+        """Break sentences longer than 25 words."""
+        sentences = re.split(r'([.!?]+)', script)
+        optimized_sentences = []
+        
+        for sentence in sentences:
+            if len(sentence.split()) > 25:
+                # Break at natural points
+                broken = self._break_sentence_at_conjunctions(sentence)
+                optimized_sentences.append(broken)
+            else:
+                optimized_sentences.append(sentence)
+        
+        return ''.join(optimized_sentences)
+    
+    def _break_sentence_at_conjunctions(self, sentence: str) -> str:
+        """Break long sentences at natural conjunction points."""
+        # Break at common conjunctions
+        conjunctions = ['and', 'but', 'or', 'so', 'yet', 'however', 'therefore', 'meanwhile']
+        
+        for conjunction in conjunctions:
+            pattern = r'([,;])\s+(' + conjunction + r')\s+'
+            if re.search(pattern, sentence, re.IGNORECASE):
+                sentence = re.sub(pattern, r'\1\2. ', sentence, flags=re.IGNORECASE)
+                break
+        
+        return sentence
+    
+    def _optimize_punctuation(self, script: str) -> str:
+        """Optimize punctuation for natural speech patterns."""
+        # Add pauses for dramatic effect
+        script = re.sub(r'([.!?])\s+', r'\1 ... ', script)
+        
+        # Ensure proper spacing around quotes
+        script = re.sub(r'"([^"]+)"', r'"\1"', script)
+        
+        return script
+    
+    def _optimize_numbers_and_dates(self, script: str) -> str:
+        """Convert numbers and dates to speech-friendly format."""
+        # Convert years to speech format
+        script = re.sub(r'\b(19|20)(\d{2})\b', r'\1-\2', script)
+        
+        # Convert large numbers (simplified version)
+        script = re.sub(r'\b(\d{1,3}),(\d{3})\b', r'\1 thousand \2', script)
+        
+        return script

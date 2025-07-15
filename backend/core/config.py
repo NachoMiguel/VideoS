@@ -92,6 +92,13 @@ CRITICAL REQUIREMENT: Your final script must be 20,000-30,000 characters long. T
 
 I need you to transform this YouTube transcript into a high-retention, engaging script that keeps viewers hooked from start to finish. Here's my specific approach:
 
+TTS OPTIMIZATION REQUIREMENTS:
+1. Use simple, clear vocabulary that sounds natural when spoken
+2. Keep sentences under 20 words for easy comprehension
+3. Use active voice and direct language
+4. Avoid complex sentence structures and run-on sentences
+5. Use natural speech patterns and conversational flow
+
 CONTENT TRANSFORMATION GOALS:
 1. Create a flowing narrative that feels like a compelling story, not a transcript summary
 2. Use the transcript as raw material but elevate it with engaging storytelling techniques
