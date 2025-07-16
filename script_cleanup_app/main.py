@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-Script Cleanup Application
-Standalone app to apply all cleanup processes to a manually created script.
+Script Cleanup Application with Video Context Support
 """
 
 import sys
@@ -21,11 +20,12 @@ async def main():
     print("🧹 SCRIPT CLEANUP APPLICATION")
     print("=" * 50)
     
-    # Get input script path
-    if len(sys.argv) != 2:
-        print("❌ Usage: python main.py <input_script_path>")
-        print("Example: python main.py input/my_script.txt")
-        print("Example: python main.py ../script_tests/generated_script_20250715_140819_okksWNdNaTk.txt")
+    # Parse arguments
+    if len(sys.argv) < 2:
+        print("❌ Usage: python main.py <input_script_path> [video_id]")
+        print("Examples:")
+        print("  python main.py input/script.txt okksWNdNaTk")
+        print("  python main.py input/script.txt")
         return
     
     input_path = Path(sys.argv[1])
@@ -34,11 +34,27 @@ async def main():
         print(f"❌ Input file not found: {input_path}")
         return
     
+    # Extract video context if video_id provided
+    video_context = None
+    if len(sys.argv) >= 3:
+        video_id = sys.argv[2]
+        try:
+            from services.youtube import YouTubeService
+            youtube_service = YouTubeService()
+            print(f" Extracting context from video ID: {video_id}")
+            video_context = await youtube_service.extract_video_context(video_id)
+            print(f"✅ Video context extracted successfully")
+        except Exception as e:
+            print(f"❌ Failed to extract video context: {str(e)}")
+            print(f"⚠️ Continuing without video context...")
+    else:
+        print(f"ℹ️ No video ID provided - will use script extraction fallback")
+    
     # Initialize processor
     processor = ScriptProcessor()
     
     # Process the script
-    print(f"�� Processing: {input_path}")
+    print(f" Processing: {input_path}")
     print(f"📊 File size: {input_path.stat().st_size} bytes")
     
     try:
@@ -46,21 +62,9 @@ async def main():
         with open(input_path, 'r', encoding='utf-8') as f:
             raw_script = f.read()
         
-        print(f"�� Raw script length: {len(raw_script)} characters")
+        print(f" Raw script length: {len(raw_script)} characters")
         
-        # Extract video context if video_id is provided
-        video_context = None
-        if len(sys.argv) >= 3:
-            video_id = sys.argv[2]
-            try:
-                from services.youtube import YouTubeService
-                youtube_service = YouTubeService()
-                video_context = await youtube_service.extract_video_context(video_id)
-                print(f"✅ Extracted video context for entity variations")
-            except Exception as e:
-                print(f"Failed to extract video context: {str(e)}")
-        
-        # Process script with video context
+        # Process script with context
         cleaned_script = await processor.process_script(raw_script, video_context)
         
         # Generate output filename
@@ -74,7 +78,7 @@ async def main():
             f.write(cleaned_script)
         
         print(f"\n✅ CLEANUP COMPLETE")
-        print(f"�� Output saved to: {output_path}")
+        print(f" Output saved to: {output_path}")
         print(f"📊 Cleaned script length: {len(cleaned_script)} characters")
         
         # Show before/after comparison

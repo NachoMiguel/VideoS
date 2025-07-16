@@ -29,7 +29,71 @@ class ScriptProcessor:
         self.original_script = ""
         self.cleaned_script = ""
         
-    async def process_script(self, script_content: str) -> str:
+    def _extract_main_entities(self, video_context: Dict) -> List[str]:
+        """Algorithmically extract main character entities from video context."""
+        if not video_context:
+            return []
+        
+        raw_entities = video_context.get('potential_entities', [])
+        if not raw_entities:
+            return []
+        
+        logger.info(f"   Raw entities from video context: {raw_entities}")
+        
+        # Step 1: Clean and normalize entities
+        cleaned_entities = []
+        for entity in raw_entities:
+            # Remove punctuation and normalize
+            clean_entity = re.sub(r'[^\w\s\-]', '', entity).strip()
+            if clean_entity and len(clean_entity) >= 8:
+                cleaned_entities.append(clean_entity)
+        
+        # Step 2: Remove duplicates (case-insensitive)
+        unique_entities = []
+        seen_lower = set()
+        for entity in cleaned_entities:
+            if entity.lower() not in seen_lower:
+                unique_entities.append(entity)
+                seen_lower.add(entity.lower())
+        
+        # Step 3: Filter out partial matches and non-character entities
+        main_entities = []
+        for entity in unique_entities:
+            # Skip if it's a subset of another entity
+            is_subset = False
+            for other in unique_entities:
+                if entity != other and entity.lower() in other.lower():
+                    is_subset = True
+                    break
+            
+            # Skip common non-character words
+            common_words = {'the', 'and', 'with', 'from', 'about', 'this', 'that', 'would', 'could', 'should', 'will', 'can', 'may', 'might', 'must', 'yet', 'still', 'others', 'some', 'many', 'few', 'each', 'every', 'any', 'all', 'both', 'either', 'neither', 'las', 'vegas', 'hollywood', 'movie', 'film', 'cinema', 'action', 'truth', 'finally', 'confirms'}
+            
+            entity_words = entity.lower().split()
+            if any(word in common_words for word in entity_words):
+                continue
+            
+            # Skip single words (likely not full names)
+            if len(entity.split()) < 2:
+                continue
+            
+            # Skip if it's a location or common phrase
+            if any(location in entity.lower() for location in ['las vegas', 'hollywood', 'new york', 'los angeles']):
+                continue
+            
+            if not is_subset:
+                main_entities.append(entity)
+        
+        # Step 4: Sort by relevance (longer names first, then by frequency)
+        main_entities.sort(key=lambda x: (len(x), raw_entities.count(x)), reverse=True)
+        
+        # Step 5: Limit to top 2-3 main characters
+        final_entities = main_entities[:3]
+        
+        logger.info(f"   Main entities extracted: {final_entities}")
+        return final_entities
+
+    async def process_script(self, script_content: str, video_context: Optional[Dict] = None) -> str:
         """Process script through all cleanup steps."""
         
         self.original_script = script_content
@@ -40,25 +104,30 @@ class ScriptProcessor:
         step1_script = self.text_cleaner.clean_for_voice(script_content)
         logger.info(f"   Length: {len(script_content)} → {len(step1_script)} characters")
         
-        # Step 2: Extract entities FIRST (before corrections)
-        logger.info("Step 2: Entity Extraction")
-        entities = self._extract_entities_from_script(step1_script)
-        logger.info(f"   Found entities: {entities}")
+        # Step 2: Algorithmic Entity Extraction
+        logger.info("Step 2: Algorithmic Entity Extraction")
+        if video_context:
+            main_entities = self._extract_main_entities(video_context)
+            logger.info(f"   Main entities: {main_entities}")
+        else:
+            # Fallback to script extraction
+            main_entities = self._extract_entities_from_script(step1_script)
+            logger.info(f"   Fallback entities: {main_entities}")
         
-        # Step 3: Name Corrections (fix ASR mistakes)
+        # Step 3: Name Corrections
         logger.info("Step 3: Name Corrections")
         step3_script = await self._apply_name_corrections(step1_script)
         logger.info(f"   Length: {len(step1_script)} → {len(step3_script)} characters")
         
-        # Step 4: Entity Variations (apply natural speech patterns)
+        # Step 4: Entity Variations
         logger.info("Step 4: Entity Variations")
-        step4_script = await self._apply_entity_variations(step3_script, entities)
+        step4_script = await self._apply_entity_variations(step3_script, main_entities)
         logger.info(f"   Length: {len(step3_script)} → {len(step4_script)} characters")
         
         # Step 5: TTS Optimization
         logger.info("Step 5: TTS Optimization")
         step5_script = await self._optimize_for_tts(step4_script)
-        logger.info(f"   Length: {len(step4_script)} → {len(step5_script)} characters")
+        logger.info(f"   Length: {len(step3_script)} → {len(step5_script)} characters")
         
         # Step 6: Final Validation
         logger.info("Step 6: Final Validation")
@@ -89,25 +158,40 @@ class ScriptProcessor:
         return corrected_script
     
     async def _apply_entity_variations(self, script: str, entities: List[str]) -> str:
-        """Apply entity variations for natural speech."""
-        if entities:
-            logger.info(f"   Applying variations for entities: {entities}")
-            
-            # Reset and register entities
-            entity_variation_manager.reset_mentions()
-            entity_variation_manager.register_entities(entities)
-            
-            # Apply variations
-            varied_script = entity_variation_manager.apply_variations_to_text(script)
-            
-            # Log what changed
-            stats = entity_variation_manager.get_statistics()
-            logger.info(f"   Entity variations applied: {stats['total_mentions']} mentions")
-            
-            return varied_script
-        else:
-            logger.info("   No entities found for variation")
+        """Apply entity variations for natural speech with PROPER word boundaries."""
+        if not entities:
             return script
+        
+        logger.info(f"   Applying variations for entities: {entities}")
+        
+        # Reset and register entities
+        entity_variation_manager.reset_mentions()
+        entity_variation_manager.register_entities(entities)
+        
+        processed_script = script
+        
+        for entity in entities:
+            # 🚨 CRITICAL FIX: Use word boundaries to match ONLY complete words
+            pattern = r'\b' + re.escape(entity) + r'\b'
+            
+            matches = list(re.finditer(pattern, processed_script, re.IGNORECASE))
+            logger.info(f"   🎯 Processing '{entity}': {len(matches)} instances found")
+            
+            if len(matches) > 0:
+                # Process matches in reverse order to maintain positions
+                for i, match in enumerate(reversed(matches)):
+                    variation = entity_variation_manager.get_variation(entity)
+                    original_text = match.group(0)
+                    
+                    # Log only the first 10 replacements for debugging
+                    if i < 10:
+                        logger.info(f"       {i+1}. '{original_text}' → '{variation}'")
+                    
+                    # Replace the matched text
+                    start, end = match.span()
+                    processed_script = processed_script[:start] + variation + processed_script[end:]
+        
+        return processed_script
     
     def _extract_entities_from_script(self, script: str) -> List[str]:
         """Extract ONLY proper entity names from script content."""

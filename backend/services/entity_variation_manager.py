@@ -131,5 +131,28 @@ class EntityVariationManager:
             "entity_mentions": dict(self.mention_count)
         }
 
+    def get_variation(self, entity: str) -> str:
+        """Get the next variation for an entity based on mention count."""
+        if entity not in self.entity_variations:
+            return entity
+        
+        variations = self.entity_variations[entity]
+        mention_count = self.mention_count[entity]
+        
+        # First mention gets full name, subsequent mentions get variations
+        if mention_count == 0:
+            # First mention - use full name
+            variation = variations[0]  # Full name
+        else:
+            # Subsequent mentions - cycle through variations (skip full name)
+            variation_index = (mention_count % (len(variations) - 1)) + 1
+            variation = variations[variation_index]
+        
+        # Increment mention count
+        self.mention_count[entity] += 1
+        
+        logger.debug(f"   Entity '{entity}' mention #{mention_count + 1} → '{variation}'")
+        return variation
+
 # Global instance
 entity_variation_manager = EntityVariationManager() 
