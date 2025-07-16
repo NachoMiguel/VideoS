@@ -30,6 +30,7 @@ from services.openai import OpenAIService
 from services.elevenlabs import ElevenLabsService
 from services.image_search import ImageSearchService
 from services.topic_driven_generator import TopicDrivenScriptGenerator
+from services.entity_variation_manager import entity_variation_manager
 
 router = APIRouter()
 
@@ -661,9 +662,22 @@ async def process_video_pipeline(session_id: str):
             try:
                 if session.script and session.script.get("content"):
                     audio_file = f"output/{session_id}_audio.mp3"
+                    
+                    # 🎯 NEW: Extract video context for entity variations
+                    video_context = None
+                    if session.script.get("video_id"):
+                        try:
+                            youtube_service = YouTubeService()
+                            video_context = await youtube_service.extract_video_context(session.script["video_id"])
+                            logger.info(f"✅ Extracted video context for entity variations")
+                        except Exception as e:
+                            logger.warning(f"Failed to extract video context: {str(e)}")
+                    
+                    # 🎯 NEW: Pass video context to audio generation
                     generated_audio = await elevenlabs_service.generate_audio_from_script(
                         session.script["content"], 
-                        audio_file
+                        audio_file,
+                        video_context  # Pass video context for entity variations
                     )
                     session.audio_file = generated_audio
                     logger.info(f"Generated audio: {generated_audio}")

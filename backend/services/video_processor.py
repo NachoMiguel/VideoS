@@ -369,9 +369,12 @@ class VideoProcessor:
         return await self.face_detector.train_face_recognition_async(characters)
     
     async def _generate_audio_with_error_handling(self, script_content: str, session_id: str, account_info=None):
-        """Audio generation with error handling wrapper."""
+        """Audio generation with error handling wrapper and TTS preprocessing."""
         from services.elevenlabs import elevenlabs_service
         output_path = f"output/audio_{session_id}.mp3"
+        
+        # 🎯 NEW: Script now goes through TTS preprocessing automatically
+        # The generate_audio_from_script method now includes preprocessing
         return await elevenlabs_service.generate_audio_from_script(script_content, output_path)
     
     async def _analyze_scenes_with_error_handling(self, video_path: str, session_id: str):

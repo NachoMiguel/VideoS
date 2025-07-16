@@ -16,9 +16,6 @@ from core.credit_manager import credit_manager, ServiceType
 from core.parallel_error_handler import OperationType
 from core.logger import logger
 from .text_cleaner import text_cleaner
-# from .topic_driven_generator import TopicDrivenScriptGenerator # REMOVED - using lazy import
-
-# logger = logging.getLogger(__name__)  # COMMENTED OUT - using core.logger instead
 
 class OpenAIService:
     """Enhanced OpenAI service with parallel processing and context-aware script modifications."""
@@ -141,21 +138,56 @@ class OpenAIService:
         """Get default prompts if prompts.md is not available."""
         return {
             'basic_youtube_content_analysis': """
-Please rewrite the following YouTube transcript into an engaging video script that will be used to create a new video by mixing scenes from multiple source videos.
+I need you to transform this YouTube transcript into a high-retention, engaging script that keeps viewers hooked from start to finish. Here's my specific approach:
 
-Requirements:
-1. Maintain the core message and key points from the original content
-2. Make it more engaging and conversational for video format
-3. Break it into clear segments that can be matched with video scenes
-4. Add natural transitions between topics
-5. Keep it concise and impactful for video consumption
-6. Structure it in a way that allows for easy scene matching and video assembly
-7. Preserve the educational or entertainment value of the original content
+CONTENT TRANSFORMATION GOALS:
+1. Create a flowing narrative that feels like a compelling story, not a transcript summary
+2. Use the transcript as raw material but elevate it with engaging storytelling techniques
+3. Target 20,000-30,000 characters for optimal content length
+4. Maintain natural, conversational flow throughout
 
-Original Transcript:
+ENGAGEMENT TECHNIQUES TO INCLUDE:
+- Open with a powerful hook that immediately grabs attention
+- Use smooth transitions that build anticipation for what's coming next
+- Include mysterious or intriguing elements that create curiosity gaps
+- Add emotional moments and relatable human experiences
+- Use varied sentence lengths and rhythms to maintain interest
+- Include strategic pauses and emphasis points for dramatic effect
+
+STRUCTURE REQUIREMENTS:
+-Introduction: Open with a bold statement or question that immediately pulls viewers in without giving away too much.
+-Sections: Break the story into 6-8 sections, each adding new information and keeping the pace fast. Avoid starting each chapter with a repeated intro or reference to the title—just dive straight into the new information.
+-Conclusion: Summarize the video's main points with a thought-provoking or surprising note, encouraging viewers to think about the topic beyond the video.
+-Format: Write the script in paragraph form with no "movie director" language. Avoid phrases like "[Cut to shot of…]" or stage directions, and write as though it's a story told in a straightforward, engaging way
+
+TONE AND STYLE:
+- Conversational and engaging, like telling a story to a friend
+- Slightly mysterious and intriguing where appropriate
+- Authentic and relatable, avoiding robotic or formulaic language
+- Dynamic pacing that speeds up and slows down for dramatic effect
+
+TOPICS AND THEMES
+-Focus on controversial, shocking, or unknown elements of the subject's life or career.
+-Incorporate recent rumors, controversies, and speculations whenever possible to keep content fresh.
+-Highlight the subject's challenges, untold stories, or conflicts that viewers may not know.
+
+PHRASING, DRAMATIC LANGUAGE, AND CENSORSHIP
+-Use powerful, engaging language, like "shocking," "exposed," or "revealed," to hold the viewer's attention.
+-Censor or reword sensitive topics to ensure compliance with YouTube's guidelines:
+-Avoid direct language for terms like "suicide," "overdose," or "criminal accusations."
+-Use indirect phrasing (e.g., "off'd himself" for "suicide," "O.D'd" for "overdose," "accusations surfaced" for legal issues).
+-Ensure any profanity is censored, e.g., "dmn" or "sht."
+-Don't repeat introductions or start each section with references to the title—just get straight to the point.
+
+CARIED WORDING FOR KEY PHRASES
+-Avoid overusing specific phrases or descriptions (e.g., "shocking truth" or "exposed"). Instead, vary the language to keep the script fresh and engaging.
+-This ensures the script flows naturally and avoids a formulaic tone.
+
+Transform the following transcript into this type of engaging, complete script:
+
 {transcript}
 
-Please provide the rewritten script in a clear format with natural segments and smooth transitions that will work well for video assembly.
+Provide only the final script - no explanations, no structure notes, just the complete flowing narrative ready to use.
             """,
             'shorten': """
 Shorten the following text while preserving its core meaning and maintaining natural flow with the surrounding context.
@@ -217,14 +249,14 @@ Provide only the connecting text (can be empty if contexts connect naturally).
                 return await self._chunk_and_process_transcript(transcript, custom_prompt)
             
             # 🎯 NEW: Use topic-driven generation instead of semantic continuation
-            logger.info("🎯 Using Topic-Driven Script Generation")
-            logger.info("🎯 About to get topic generator...")
+            logger.info(" Using Topic-Driven Script Generation")
+            logger.info(" About to get topic generator...")
             
             topic_generator = self._get_topic_generator()  # Lazy initialization
             logger.info("✅ Topic generator obtained successfully")
             
             logger.info("🔍 About to call topic_generator.generate_script...")
-            # 🎯 NEW: Pass video_id to topic generator
+            #  NEW: Pass video_id to topic generator
             result = await topic_generator.generate_script(transcript, video_id)
             logger.info(f"✅ Topic-driven generation successful: {len(result)} characters")
             
@@ -263,7 +295,7 @@ Provide only the connecting text (can be empty if contexts connect naturally).
             # Transcript too long - will need chunking (unlikely with 125k context)
             logger.warning(f"Transcript ({input_tokens} tokens) exceeds context limit ({available_context}). Consider chunking.")
             optimal_tokens = MAX_COMPLETION_TOKENS
-            else:
+        else:
             # For 20,000-30,000 character target (5,000-7,500 tokens)
             target_chars = 30000  # Upper end of range for longer output
             target_tokens = target_chars // 4  # 7,500 tokens
@@ -273,7 +305,7 @@ Provide only the connecting text (can be empty if contexts connect naturally).
         
         logger.info(f"Calculated optimal tokens: {optimal_tokens} for transcript length: {len(transcript)} chars ({input_tokens} tokens)")
         return optimal_tokens
-    
+
     async def _generate_with_continuation(self, initial_prompt: str, max_tokens: int, target_length: int = 25000) -> str:
         """Generate script with overlap-aware continuation system to prevent repetition."""
         MIN_LENGTH = 20000  # Minimum acceptable length
@@ -281,16 +313,16 @@ Provide only the connecting text (can be empty if contexts connect naturally).
         logger.info(f"INSIDE GENERATE WITH CONTINUATION---->BEFORE CHAT COMPLETION")
 
         # Step 1: Generate initial script
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "You are an expert video script writer specializing in creating engaging content for video assembly."},
-            {"role": "user", "content": initial_prompt}
-                ],
-                temperature=self.temperature,
-        max_tokens=max_tokens,
-                timeout=self.timeout
-            )
+        response = await self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": "You are an expert video script writer specializing in creating engaging content for video assembly."},
+                {"role": "user", "content": initial_prompt}
+            ],
+            temperature=self.temperature,
+            max_tokens=max_tokens,
+            timeout=self.timeout
+        )
         logger.info(f"INSIDE GENERATE WITH CONTINUATION---->AFTER CHAT COMPLETION")
 
         current_script = response.choices[0].message.content.strip()
@@ -349,24 +381,24 @@ Provide only the connecting text (can be empty if contexts connect naturally).
         # Enhanced continuation prompt with stronger quality focus
         continuation_prompt = f"""You are continuing a video script. Your task is to write NEW content that extends the narrative while maintaining HIGH QUALITY.
 
-TARGET: Add approximately {needed_chars} characters to reach {target_length} total characters.
+        TARGET: Add approximately {needed_chars} characters to reach {target_length} total characters.
 
-CONTEXT (last few paragraphs of existing script):
-{context}
+        CONTEXT (last few paragraphs of existing script):
+        {context}
 
-CRITICAL INSTRUCTIONS:
-1. Write ONLY new content - do NOT repeat or rephrase any part of the existing script
-2. Continue the narrative naturally from where it left off
-3. Expand with new details, examples, anecdotes, or perspectives
-4. Maintain the same engaging tone and writing style
-5. Do NOT start by restating what has already been covered
-6. FOCUS ON QUALITY: Each sentence must add value and advance the story
-7. AVOID REPETITION: Do not repeat concepts already covered
-8. MAINTAIN COHERENCE: Ensure logical flow and smooth transitions
-9. ADD DEPTH: Provide new insights, analysis, or perspectives
-10. KEEP ENGAGING: Maintain audience interest throughout
+        CRITICAL INSTRUCTIONS:
+        1. Write ONLY new content - do NOT repeat or rephrase any part of the existing script
+        2. Continue the narrative naturally from where it left off
+        3. Expand with new details, examples, anecdotes, or perspectives
+        4. Maintain the same engaging tone and writing style
+        5. Do NOT start by restating what has already been covered
+        6. FOCUS ON QUALITY: Each sentence must add value and advance the story
+        7. AVOID REPETITION: Do not repeat concepts already covered
+        8. MAINTAIN COHERENCE: Ensure logical flow and smooth transitions
+        9. ADD DEPTH: Provide new insights, analysis, or perspectives
+        10. KEEP ENGAGING: Maintain audience interest throughout
 
-Write the continuation:"""
+        Write the continuation:"""
 
         try:
             continuation_response = await self.client.chat.completions.create(
@@ -491,326 +523,6 @@ Write the continuation:"""
         
         return len(intersection) / len(union)
 
-class ScriptQualityAnalyzer:
-    """Advanced semantic analysis for script quality validation."""
-    
-    def __init__(self, openai_service):
-        self.openai_service = openai_service
-        
-    def _extract_json_from_response(self, response: str) -> Dict[str, Any]:
-        """Extract JSON from response, handling markdown formatting."""
-        try:
-            # Remove markdown code blocks if present
-            if response.strip().startswith('```'):
-                lines = response.strip().split('\n')
-                # Remove first line (```json or ```)
-                if lines[0].startswith('```'):
-                    lines = lines[1:]
-                # Remove last line (```)
-                if lines and lines[-1].strip() == '```':
-                    lines = lines[:-1]
-                response = '\n'.join(lines)
-            
-            return json.loads(response.strip())
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON parsing failed: {e}")
-            logger.error(f"Raw response: {response}")
-            return self._get_fallback_analysis()
-
-    async def analyze_content_quality(self, script: str) -> Dict[str, Any]:
-        """Comprehensive quality analysis using GPT-4 as semantic analyzer."""
-        
-        analysis_prompt = f"""Analyze this script for content quality and repetition issues:
-
-SCRIPT TO ANALYZE:
-{script}
-
-Provide analysis in JSON format (NO MARKDOWN FORMATTING):
-{{
-    "narrative_progression": {{
-        "score": 0.0-1.0,
-        "issues": ["list of progression problems"],
-        "repetitive_concepts": ["concepts that appear too often"]
-    }},
-    "content_density": {{
-        "score": 0.0-1.0,
-        "padding_detected": true/false,
-        "low_value_sections": ["sections that don't add value"]
-    }},
-    "coherence": {{
-        "score": 0.0-1.0,
-        "transition_quality": 0.0-1.0,
-        "logical_flow_breaks": ["places where flow breaks"]
-    }},
-    "repetition_analysis": {{
-        "conceptual_duplicates": [
-            {{"concept": "repeated concept", "occurrences": ["locations"], "severity": "low/medium/high"}}
-        ],
-        "redundant_paragraphs": ["paragraph numbers that are redundant"]
-    }},
-    "overall_quality": {{
-        "score": 0.0-1.0,
-        "is_production_ready": true/false,
-        "improvement_needed": ["specific improvements needed"]
-    }}
-}}
-
-Return ONLY the JSON object, no markdown formatting."""
-
-        try:
-            response = await self.openai_service.client.chat.completions.create(
-                model=self.openai_service.model,
-                messages=[
-                    {"role": "system", "content": "You are a script quality analyst. Provide detailed analysis in JSON format only."},
-                    {"role": "user", "content": analysis_prompt}
-                ],
-                temperature=0.3,
-                max_tokens=2000,
-                timeout=self.openai_service.timeout
-            )
-            
-            analysis_text = response.choices[0].message.content.strip()
-            return self._extract_json_from_response(analysis_text)
-            
-        except Exception as e:
-            logger.error(f"Quality analysis failed: {str(e)}")
-            return self._get_fallback_analysis()
-
-    def _get_fallback_analysis(self) -> Dict[str, Any]:
-        """Fallback analysis when GPT analysis fails."""
-        return {
-            "narrative_progression": {"score": 0.8, "issues": ["Unable to analyze"], "repetitive_concepts": []},
-            "content_density": {"score": 0.8, "padding_detected": False, "low_value_sections": []},
-            "coherence": {"score": 0.8, "transition_quality": 0.8, "logical_flow_breaks": []},
-            "repetition_analysis": {"conceptual_duplicates": [], "redundant_paragraphs": []},
-            "overall_quality": {"score": 0.8, "is_production_ready": True, "improvement_needed": ["Manual review needed"]}
-        }
-
-    async def _generate_with_semantic_continuation(self, initial_prompt: str, max_tokens: int, target_length: int = 25000) -> str:
-        """Generate script with semantic quality validation at each step."""
-        
-        MIN_QUALITY_SCORE = 0.7
-        MIN_LENGTH = target_length * 0.8  # 80% of target
-        MAX_CONTINUATIONS = 3
-        
-        # Step 1: Generate initial script
-        logger.info("🎯 Generating initial script with quality focus")
-        
-        enhanced_prompt = f"""{initial_prompt}
-
-    QUALITY REQUIREMENTS:
-    - Each paragraph must introduce NEW information or perspectives
-    - Avoid repeating the same concepts with different wording
-    - Maintain clear narrative progression throughout
-    - Focus on information density over padding
-    - Ensure each section adds value to the overall story"""
-
-        response = await self.openai_service.client.chat.completions.create(
-            model=self.openai_service.model,
-            messages=[
-                {"role": "system", "content": "You are an expert video script writer focused on high-quality, non-repetitive content."},
-                {"role": "user", "content": enhanced_prompt}
-            ],
-            temperature=self.openai_service.temperature,
-            max_tokens=max_tokens,
-            timeout=self.openai_service.timeout
-        )
-
-        current_script = response.choices[0].message.content.strip()
-        
-        # 🎯 DIAGNOSTIC: Log initial script length
-        logger.info(f"🔍 DIAGNOSTIC: Initial script length: {len(current_script)} characters")
-        logger.info(f"🔍 DIAGNOSTIC: Target length: {MIN_LENGTH} characters")
-        logger.info(f"🔍 DIAGNOSTIC: Needs continuation: {len(current_script) < MIN_LENGTH}")
-        
-        # Step 2: Analyze initial quality
-        quality_analysis = await self.analyze_content_quality(current_script)
-        
-        logger.info(f"📊 Initial Quality Analysis:")
-        logger.info(f"   📈 Overall Score: {quality_analysis['overall_quality']['score']:.2f}")
-        logger.info(f"   📚 Narrative Progression: {quality_analysis['narrative_progression']['score']:.2f}")
-        logger.info(f"   🎯 Content Density: {quality_analysis['content_density']['score']:.2f}")
-        logger.info(f"   🔗 Coherence: {quality_analysis['coherence']['score']:.2f}")
-        
-        # 🎯 DIAGNOSTIC: Log quality threshold check
-        logger.info(f"🔍 DIAGNOSTIC: Quality threshold: {MIN_QUALITY_SCORE}")
-        logger.info(f"🔍 DIAGNOSTIC: Quality meets threshold: {quality_analysis['overall_quality']['score'] >= MIN_QUALITY_SCORE}")
-        
-        # Step 3: Quality-aware continuation
-        continuation_count = 0
-        
-        while (len(current_script) < MIN_LENGTH and 
-            quality_analysis['overall_quality']['score'] >= MIN_QUALITY_SCORE and 
-            continuation_count < MAX_CONTINUATIONS):
-            
-            continuation_count += 1
-            logger.info(f"🔄 Quality-aware continuation {continuation_count}/{MAX_CONTINUATIONS}")
-            
-            # Generate continuation based on quality analysis
-            continuation_text = await self._generate_quality_guided_continuation(
-                current_script, quality_analysis, target_length, continuation_count
-            )
-            
-            # 🎯 DIAGNOSTIC: Log continuation results
-            logger.info(f"🔍 DIAGNOSTIC: Continuation {continuation_count} length: {len(continuation_text)} characters")
-            logger.info(f"🔍 DIAGNOSTIC: Continuation {continuation_count} empty: {not continuation_text}")
-            
-            if continuation_text:
-                # Test combined script quality before committing
-                test_script = current_script + '\n\n' + continuation_text
-                test_quality = await self.analyze_content_quality(test_script)
-                
-                # 🎯 DIAGNOSTIC: Log quality test results
-                logger.info(f"🔍 DIAGNOSTIC: Test quality score: {test_quality['overall_quality']['score']:.2f}")
-                logger.info(f"🔍 DIAGNOSTIC: Quality acceptable: {test_quality['overall_quality']['score'] >= MIN_QUALITY_SCORE}")
-                
-                # Only accept if quality doesn't degrade
-                if test_quality['overall_quality']['score'] >= MIN_QUALITY_SCORE:
-                    current_script = test_script
-                    quality_analysis = test_quality
-                    
-                    logger.info(f"✅ Continuation accepted - Quality: {test_quality['overall_quality']['score']:.2f}")
-                    logger.info(f"🔍 DIAGNOSTIC: Total length after continuation {continuation_count}: {len(current_script)} characters")
-                else:
-                    logger.warning(f"❌ Continuation rejected - Quality dropped to {test_quality['overall_quality']['score']:.2f}")
-                    break
-            else:
-                logger.warning(f"🔍 DIAGNOSTIC: Continuation {continuation_count} produced no content")
-                break
-            
-            await asyncio.sleep(1)
-        
-        # 🎯 DIAGNOSTIC: Log final state
-        logger.info(f"🔍 DIAGNOSTIC: Final script length: {len(current_script)} characters")
-        logger.info(f"🔍 DIAGNOSTIC: Continuations attempted: {continuation_count}")
-        logger.info(f"🔍 DIAGNOSTIC: Length target met: {len(current_script) >= MIN_LENGTH}")
-        
-        # Final quality check
-        final_quality = quality_analysis['overall_quality']['score']
-        if final_quality < MIN_QUALITY_SCORE:
-            logger.warning(f"⚠️ Final script quality below threshold: {final_quality}")
-            
-            # Try to improve quality, but ONLY if it doesn't make the script shorter
-            original_length = len(current_script)
-            improved_script = await self._improve_script_quality(current_script, quality_analysis)
-            
-            if len(improved_script) >= original_length:
-                # Only use improvement if it doesn't make script shorter
-                current_script = improved_script
-                logger.info(f"✅ Quality improvement successful: {final_quality}")
-            else:
-                # Keep original script if improvement makes it shorter
-                logger.warning(f"⚠️ Quality improvement rejected - would reduce length from {original_length} to {len(improved_script)} chars")
-        
-        # Clean and return
-        current_script = text_cleaner.clean_for_voice(current_script)
-        
-        # Final logging
-        logger.info(f"🏆 SEMANTIC CONTINUATION COMPLETE:")
-        logger.info(f"   📊 Length: {len(current_script)} characters")
-        logger.info(f"   📈 Quality Score: {final_quality:.2f}")
-        logger.info(f"   ✅ Production Ready: {quality_analysis['overall_quality']['is_production_ready']}")
-        
-        return current_script
-
-    async def _generate_quality_guided_continuation(self, current_script: str, quality_analysis: Dict, target_length: int, continuation_num: int) -> str:
-        """Generate continuation specifically addressing quality analysis findings."""
-        
-        remaining_chars = target_length - len(current_script)
-        
-        # Extract specific guidance from quality analysis
-        issues = quality_analysis['overall_quality'].get('improvement_needed', [])
-        repetitive_concepts = quality_analysis['narrative_progression'].get('repetitive_concepts', [])
-        
-        quality_guidance = "Based on content analysis:\n"
-        if issues:
-            quality_guidance += f"- Address these issues: {', '.join(issues)}\n"
-        if repetitive_concepts:
-            quality_guidance += f"- Avoid repeating these concepts: {', '.join(repetitive_concepts)}\n"
-        
-        # Get fresh context (last paragraph only)
-        context = self._extract_fresh_context(current_script)
-        
-        continuation_prompt = f"""Continue this script with HIGH QUALITY, non-repetitive content.
-
-    TARGET: Add ~{remaining_chars} characters with VALUABLE new information.
-
-    {quality_guidance}
-
-    LAST PARAGRAPH FOR CONTEXT:
-    {context}
-
-    CONTINUATION REQUIREMENTS:
-    1. Introduce COMPLETELY NEW aspects of the story
-    2. Provide fresh insights, examples, or perspectives  
-    3. Advance the narrative meaningfully
-    4. NO repetition of existing concepts or information
-    5. Focus on information density, not padding
-
-    Write the continuation (NEW valuable content only):"""
-
-        response = await self.openai_service.client.chat.completions.create(
-            model=self.openai_service.model,
-            messages=[
-                {"role": "system", "content": "You are a script writer focused on high-quality, information-dense content. Never repeat existing information."},
-                {"role": "user", "content": continuation_prompt}
-            ],
-            temperature=0.8,  # Higher creativity for fresh content
-            max_tokens=min(6000, remaining_chars // 3),
-            timeout=self.openai_service.timeout
-        )
-        
-        return response.choices[0].message.content.strip()
-
-    async def _improve_script_quality(self, script: str, quality_analysis: Dict) -> str:
-        """Improve script quality based on analysis findings."""
-        
-        improvement_prompt = f"""Improve this script's quality by addressing the identified issues:
-
-    ISSUES TO FIX:
-    {json.dumps(quality_analysis['overall_quality']['improvement_needed'], indent=2)}
-
-    REPETITIVE CONCEPTS TO REMOVE:
-    {json.dumps(quality_analysis['narrative_progression']['repetitive_concepts'], indent=2)}
-
-    SCRIPT TO IMPROVE:
-    {script}
-
-    INSTRUCTIONS:
-    1. Remove or consolidate repetitive content
-    2. Strengthen narrative progression
-    3. Improve transitions and coherence
-    4. Increase information density
-    5. Maintain or increase length through QUALITY content, not padding
-
-    Return the improved script:"""
-
-        response = await self.openai_service.client.chat.completions.create(
-            model=self.openai_service.model,
-            messages=[
-                {"role": "system", "content": "You are an expert script editor focused on quality improvement without repetition."},
-                {"role": "user", "content": improvement_prompt}
-            ],
-            temperature=0.6,
-            max_tokens=12000,
-            timeout=self.openai_service.timeout
-        )
-        
-        improved_script = response.choices[0].message.content.strip()
-        logger.info(f"📝 Script quality improvement completed")
-        
-        return improved_script
-
-    def _extract_fresh_context(self, script: str, max_chars: int = 500) -> str:
-        """Extract minimal context to avoid feeding repetitive content back."""
-        paragraphs = script.split('\n\n')
-        return paragraphs[-1][-max_chars:] if paragraphs else ""
-
-    
-
-    
-    
-    
     async def _chunk_and_process_transcript(self, transcript: str, custom_prompt: Optional[str] = None) -> str:
         """Process very large transcripts by chunking them."""
         MAX_CHUNK_SIZE = 12000  # Characters per chunk (≈3000 tokens)
@@ -1317,12 +1029,422 @@ Return ONLY the JSON object, no markdown formatting."""
             logger.error(f"Basic segment creation error: {str(e)}")
             return [{"text": script_text[:500], "characters": [], "actions": [], "tone": "neutral", "duration_estimate": 30}]
 
+
+class ScriptQualityAnalyzer:
+    """Advanced semantic analysis for script quality validation."""
     
+    def __init__(self, openai_service):
+        self.openai_service = openai_service
+        
+    def _extract_json_from_response(self, response: str) -> Dict[str, Any]:
+        """Extract JSON from response, handling markdown formatting."""
+        try:
+            # Remove markdown code blocks if present
+            if response.strip().startswith('```'):
+                lines = response.strip().split('\n')
+                # Remove first line (```json or ```)
+                if lines[0].startswith('```'):
+                    lines = lines[1:]
+                # Remove last line (```)
+                if lines and lines[-1].strip() == '```':
+                    lines = lines[:-1]
+                response = '\n'.join(lines)
+            
+            return json.loads(response.strip())
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON parsing failed: {e}")
+            logger.error(f"Raw response: {response}")
+            return self._get_fallback_analysis()
 
-# REMOVE OR COMMENT OUT the global instance line:
-# openai_service = OpenAIService()
+    async def analyze_content_quality(self, script: str) -> Dict[str, Any]:
+        """Comprehensive quality analysis using GPT-4 as semantic analyzer."""
+        
+        analysis_prompt = f"""Analyze this script for content quality and repetition issues:
 
-# REPLACE with lazy initialization function:
+SCRIPT TO ANALYZE:
+{script}
+
+Provide analysis in JSON format (NO MARKDOWN FORMATTING):
+{{
+    "narrative_progression": {{
+        "score": 0.0-1.0,
+        "issues": ["list of progression problems"],
+        "repetitive_concepts": ["concepts that appear too often"]
+    }},
+    "content_density": {{
+        "score": 0.0-1.0,
+        "padding_detected": true/false,
+        "low_value_sections": ["sections that don't add value"]
+    }},
+    "coherence": {{
+        "score": 0.0-1.0,
+        "transition_quality": 0.0-1.0,
+        "logical_flow_breaks": ["places where flow breaks"]
+    }},
+    "repetition_analysis": {{
+        "conceptual_duplicates": [
+            {{"concept": "repeated concept", "occurrences": ["locations"], "severity": "low/medium/high"}}
+        ],
+        "redundant_paragraphs": ["paragraph numbers that are redundant"]
+    }},
+    "overall_quality": {{
+        "score": 0.0-1.0,
+        "is_production_ready": true/false,
+        "improvement_needed": ["specific improvements needed"]
+    }}
+}}
+
+Return ONLY the JSON object, no markdown formatting."""
+
+        try:
+            response = await self.openai_service.client.chat.completions.create(
+                model=self.openai_service.model,
+                messages=[
+                    {"role": "system", "content": "You are a script quality analyst. Provide detailed analysis in JSON format only."},
+                    {"role": "user", "content": analysis_prompt}
+                ],
+                temperature=0.3,
+                max_tokens=2000,
+                timeout=self.openai_service.timeout
+            )
+            
+            analysis_text = response.choices[0].message.content.strip()
+            return self._extract_json_from_response(analysis_text)
+            
+        except Exception as e:
+            logger.error(f"Quality analysis failed: {str(e)}")
+            return self._get_fallback_analysis()
+
+    def _get_fallback_analysis(self) -> Dict[str, Any]:
+        """Fallback analysis when GPT analysis fails."""
+        return {
+            "narrative_progression": {"score": 0.8, "issues": ["Unable to analyze"], "repetitive_concepts": []},
+            "content_density": {"score": 0.8, "padding_detected": False, "low_value_sections": []},
+            "coherence": {"score": 0.8, "transition_quality": 0.8, "logical_flow_breaks": []},
+            "repetition_analysis": {"conceptual_duplicates": [], "redundant_paragraphs": []},
+            "overall_quality": {"score": 0.8, "is_production_ready": True, "improvement_needed": ["Manual review needed"]}
+        }
+
+    async def _generate_with_semantic_continuation(self, initial_prompt: str, max_tokens: int, target_length: int = 25000) -> str:
+        """Generate script with semantic quality validation at each step."""
+        
+        MIN_QUALITY_SCORE = 0.7
+        MIN_LENGTH = target_length * 0.8  # 80% of target
+        MAX_CONTINUATIONS = 3
+        
+        # Step 1: Generate initial script
+        logger.info(" Generating initial script with quality focus")
+        
+        enhanced_prompt = f"""{initial_prompt}
+
+    QUALITY REQUIREMENTS:
+    - Each paragraph must introduce NEW information or perspectives
+    - Avoid repeating the same concepts with different wording
+    - Maintain clear narrative progression throughout
+    - Focus on information density over padding
+    - Ensure each section adds value to the overall story"""
+
+        response = await self.openai_service.client.chat.completions.create(
+            model=self.openai_service.model,
+            messages=[
+                {"role": "system", "content": "You are an expert video script writer focused on high-quality, non-repetitive content."},
+                {"role": "user", "content": enhanced_prompt}
+            ],
+            temperature=self.openai_service.temperature,
+            max_tokens=max_tokens,
+            timeout=self.openai_service.timeout
+        )
+
+        current_script = response.choices[0].message.content.strip()
+        
+        # 🎯 DIAGNOSTIC: Log initial script length
+        logger.info(f"🔍 DIAGNOSTIC: Initial script length: {len(current_script)} characters")
+        logger.info(f" DIAGNOSTIC: Target length: {MIN_LENGTH} characters")
+        logger.info(f"🔍 DIAGNOSTIC: Needs continuation: {len(current_script) < MIN_LENGTH}")
+        
+        # Step 2: Analyze initial quality
+        quality_analysis = await self.analyze_content_quality(current_script)
+        
+        logger.info(f"📊 Initial Quality Analysis:")
+        logger.info(f"   📈 Overall Score: {quality_analysis['overall_quality']['score']:.2f}")
+        logger.info(f"   📚 Narrative Progression: {quality_analysis['narrative_progression']['score']:.2f}")
+        logger.info(f"    Content Density: {quality_analysis['content_density']['score']:.2f}")
+        logger.info(f"   🔗 Coherence: {quality_analysis['coherence']['score']:.2f}")
+        
+        # 🎯 DIAGNOSTIC: Log quality threshold check
+        logger.info(f"🔍 DIAGNOSTIC: Quality threshold: {MIN_QUALITY_SCORE}")
+        logger.info(f"🔍 DIAGNOSTIC: Quality meets threshold: {quality_analysis['overall_quality']['score'] >= MIN_QUALITY_SCORE}")
+        
+        # Step 3: Quality-aware continuation
+        continuation_count = 0
+        
+        while (len(current_script) < MIN_LENGTH and 
+            quality_analysis['overall_quality']['score'] >= MIN_QUALITY_SCORE and 
+            continuation_count < MAX_CONTINUATIONS):
+            
+            continuation_count += 1
+            logger.info(f"🔄 Quality-aware continuation {continuation_count}/{MAX_CONTINUATIONS}")
+            
+            # Generate continuation based on quality analysis
+            continuation_text = await self._generate_quality_guided_continuation(
+                current_script, quality_analysis, target_length, continuation_count
+            )
+            
+            # 🎯 DIAGNOSTIC: Log continuation results
+            logger.info(f"🔍 DIAGNOSTIC: Continuation {continuation_count} length: {len(continuation_text)} characters")
+            logger.info(f"🔍 DIAGNOSTIC: Continuation {continuation_count} empty: {not continuation_text}")
+            
+            if continuation_text:
+                # Test combined script quality before committing
+                test_script = current_script + '\n\n' + continuation_text
+                test_quality = await self.analyze_content_quality(test_script)
+                
+                # 🎯 DIAGNOSTIC: Log quality test results
+                logger.info(f"🔍 DIAGNOSTIC: Test quality score: {test_quality['overall_quality']['score']:.2f}")
+                logger.info(f"🔍 DIAGNOSTIC: Quality acceptable: {test_quality['overall_quality']['score'] >= MIN_QUALITY_SCORE}")
+                
+                # Only accept if quality doesn't degrade
+                if test_quality['overall_quality']['score'] >= MIN_QUALITY_SCORE:
+                    current_script = test_script
+                    quality_analysis = test_quality
+                    
+                    logger.info(f"✅ Continuation accepted - Quality: {test_quality['overall_quality']['score']:.2f}")
+                    logger.info(f"🔍 DIAGNOSTIC: Total length after continuation {continuation_count}: {len(current_script)} characters")
+                else:
+                    logger.warning(f"❌ Continuation rejected - Quality dropped to {test_quality['overall_quality']['score']:.2f}")
+                    break
+            else:
+                logger.warning(f"🔍 DIAGNOSTIC: Continuation {continuation_count} produced no content")
+                break
+            
+            await asyncio.sleep(1)
+        
+        # 🎯 DIAGNOSTIC: Log final state
+        logger.info(f"🔍 DIAGNOSTIC: Final script length: {len(current_script)} characters")
+        logger.info(f"🔍 DIAGNOSTIC: Continuations attempted: {continuation_count}")
+        logger.info(f" DIAGNOSTIC: Length target met: {len(current_script) >= MIN_LENGTH}")
+        
+        # Final quality check
+        final_quality = quality_analysis['overall_quality']['score']
+        if final_quality < MIN_QUALITY_SCORE:
+            logger.warning(f"⚠️ Final script quality below threshold: {final_quality}")
+            
+            # Try to improve quality, but ONLY if it doesn't make the script shorter
+            original_length = len(current_script)
+            improved_script = await self._improve_script_quality(current_script, quality_analysis)
+            
+            if len(improved_script) >= original_length:
+                # Only use improvement if it doesn't make script shorter
+                current_script = improved_script
+                logger.info(f"✅ Quality improvement successful: {final_quality}")
+            else:
+                # Keep original script if improvement makes it shorter
+                logger.warning(f"⚠️ Quality improvement rejected - would reduce length from {original_length} to {len(improved_script)} chars")
+        
+        # Clean and return
+        current_script = text_cleaner.clean_for_voice(current_script)
+        
+        # Final logging
+        logger.info(f"🏆 SEMANTIC CONTINUATION COMPLETE:")
+        logger.info(f"   📊 Length: {len(current_script)} characters")
+        logger.info(f"   📈 Quality Score: {final_quality:.2f}")
+        logger.info(f"   ✅ Production Ready: {quality_analysis['overall_quality']['is_production_ready']}")
+        
+        return current_script
+
+    async def _generate_quality_guided_continuation(self, current_script: str, quality_analysis: Dict[str, Any], target_length: int, continuation_count: int) -> str:
+        """Generate continuation text that maintains or improves quality."""
+        
+        MIN_QUALITY_SCORE = 0.7
+        MAX_CONTINUATION_TOKENS = 8000
+        MIN_CONTINUATION_LENGTH = 500 # Minimum length for a meaningful continuation
+        
+        # Extract the last few paragraphs for context
+        paragraphs = current_script.split('\n\n')
+        context = '\n\n'.join(paragraphs[-3:]) if len(paragraphs) >= 3 else current_script[-2000:]
+        
+        # Construct a prompt that encourages quality and avoids repetition
+        prompt_template = f"""You are continuing a video script. Your task is to write NEW content that extends the narrative while maintaining HIGH QUALITY.
+
+        TARGET: Add approximately {target_length - len(current_script)} characters to reach {target_length} total characters.
+
+        CONTEXT (last few paragraphs of existing script):
+        {context}
+
+        CURRENT SCRIPT QUALITY ANALYSIS:
+        {{
+            "narrative_progression": {{
+                "score": {quality_analysis['narrative_progression']['score']:.2f},
+                "issues": {json.dumps(quality_analysis['narrative_progression']['issues'])},
+                "repetitive_concepts": {json.dumps(quality_analysis['narrative_progression']['repetitive_concepts'])}
+            }},
+            "content_density": {{
+                "score": {quality_analysis['content_density']['score']:.2f},
+                "padding_detected": {quality_analysis['content_density']['padding_detected']},
+                "low_value_sections": {json.dumps(quality_analysis['content_density']['low_value_sections'])}
+            }},
+            "coherence": {{
+                "score": {quality_analysis['coherence']['score']:.2f},
+                "transition_quality": {quality_analysis['coherence']['transition_quality']:.2f},
+                "logical_flow_breaks": {json.dumps(quality_analysis['coherence']['logical_flow_breaks'])}
+            }},
+            "repetition_analysis": {{
+                "conceptual_duplicates": {json.dumps(quality_analysis['repetition_analysis']['conceptual_duplicates'])},
+                "redundant_paragraphs": {json.dumps(quality_analysis['repetition_analysis']['redundant_paragraphs'])}
+            }},
+            "overall_quality": {{
+                "score": {quality_analysis['overall_quality']['score']:.2f},
+                "is_production_ready": {quality_analysis['overall_quality']['is_production_ready']},
+                "improvement_needed": {json.dumps(quality_analysis['overall_quality']['improvement_needed'])}
+            }}
+        }}
+
+        CRITICAL INSTRUCTIONS FOR CONTINUATION:
+        1. Write ONLY new content - do NOT repeat or rephrase any part of the existing script
+        2. Continue the narrative naturally from where it left off
+        3. Expand with new details, examples, anecdotes, or perspectives
+        4. Maintain the same engaging tone and writing style
+        5. Do NOT start by restating what has already been covered
+        6. FOCUS ON QUALITY: Each sentence must add value and advance the story
+        7. AVOID REPETITION: Do not repeat concepts already covered
+        8. MAINTAIN COHERENCE: Ensure logical flow and smooth transitions
+        9. ADD DEPTH: Provide new insights, analysis, or perspectives
+        10. KEEP ENGAGING: Maintain audience interest throughout
+
+        Write the continuation:"""
+
+        try:
+            continuation_response = await self.openai_service.client.chat.completions.create(
+                model=self.openai_service.model,
+                messages=[
+                    {"role": "system", "content": "You are a script writer focused on creating new, non-repetitive content. Never repeat existing content. Maintain high quality and engagement."},
+                    {"role": "user", "content": prompt_template}
+                ],
+                temperature=self.openai_service.temperature,
+                max_tokens=min(MAX_CONTINUATION_TOKENS, (target_length - len(current_script)) // 3), # Conservative token limit
+                timeout=self.openai_service.timeout
+            )
+            
+            continuation = continuation_response.choices[0].message.content.strip()
+            
+            # 🎯 DIAGNOSTIC: Log continuation length
+            logger.info(f"🔍 DIAGNOSTIC: Continuation {continuation_count} length: {len(continuation)} characters")
+            
+            # Ensure minimum length and quality
+            if len(continuation) >= MIN_CONTINUATION_LENGTH and continuation_response.choices[0].finish_reason != "stop":
+                # Test combined script quality
+                test_script = current_script + '\n\n' + continuation
+                test_quality = await self.analyze_content_quality(test_script)
+                
+                # 🎯 DIAGNOSTIC: Log quality test results
+                logger.info(f"🔍 DIAGNOSTIC: Continuation {continuation_count} quality score: {test_quality['overall_quality']['score']:.2f}")
+                logger.info(f"🔍 DIAGNOSTIC: Continuation {continuation_count} quality acceptable: {test_quality['overall_quality']['score'] >= MIN_QUALITY_SCORE}")
+                
+                if test_quality['overall_quality']['score'] >= MIN_QUALITY_SCORE:
+                    return continuation
+                else:
+                    logger.warning(f"❌ Continuation {continuation_count} rejected due to low quality: {test_quality['overall_quality']['score']:.2f}")
+                    return ""
+            else:
+                logger.warning(f"❌ Continuation {continuation_count} too short or stopped early: {len(continuation)} chars, finish_reason: {continuation_response.choices[0].finish_reason}")
+                return ""
+            
+        except Exception as e:
+            logger.error(f"Error generating quality-guided continuation: {str(e)}")
+            return ""
+
+    async def _improve_script_quality(self, script: str, current_quality: Dict[str, Any]) -> str:
+        """Attempt to improve script quality by rewriting problematic sections."""
+        
+        MIN_IMPROVEMENT_SCORE = 0.85 # Minimum score to consider improvement
+        MAX_IMPROVEMENT_TOKENS = 5000 # Maximum tokens to add for improvement
+        MAX_IMPROVEMENT_ATTEMPTS = 3
+        
+        for attempt in range(MAX_IMPROVEMENT_ATTEMPTS):
+            logger.info(f"Attempting quality improvement attempt {attempt + 1}/{MAX_IMPROVEMENT_ATTEMPTS}")
+            
+            # Analyze current quality
+            current_quality_analysis = await self.analyze_content_quality(script)
+            
+            # Check if improvement is needed
+            if current_quality_analysis['overall_quality']['score'] >= MIN_IMPROVEMENT_SCORE:
+                logger.info(f"Script quality already meets threshold ({current_quality_analysis['overall_quality']['score']:.2f}). No improvement needed.")
+                return script # Return original if no improvement
+            
+            # Identify problematic sections (e.g., low density, coherence, etc.)
+            # This is a simplified example; a more sophisticated approach would involve
+            # analyzing specific sections and their quality.
+            problematic_sections = []
+            if current_quality_analysis['content_density']['score'] < 0.7:
+                problematic_sections.append("low_value_sections")
+            if current_quality_analysis['coherence']['score'] < 0.7:
+                problematic_sections.append("logical_flow_breaks")
+            if current_quality_analysis['repetition_analysis']['conceptual_duplicates']:
+                problematic_sections.append("conceptual_duplicates")
+            
+            if not problematic_sections:
+                logger.info(f"No specific problematic sections identified. Script quality: {current_quality_analysis['overall_quality']['score']:.2f}")
+                return script # No specific issues to improve
+            
+            # Select a problematic section to improve
+            # For simplicity, we'll just pick the first one for now
+            improvement_target = problematic_sections[0]
+            
+            # Construct a prompt to improve the identified section
+            improvement_prompt = f"""
+            You are an expert script editor. Your task is to improve the following problematic section of the script to make it more engaging and coherent.
+
+            PROBLEMATIC SECTION:
+            {script}
+
+            PROBLEM: {improvement_target}
+
+            IMPROVEMENT INSTRUCTIONS:
+            1. Rewrite the problematic section to make it more engaging and compelling.
+            2. Ensure it introduces new information or perspectives.
+            3. Avoid repetition of concepts.
+            4. Maintain clear narrative progression.
+            5. Focus on information density.
+            6. Ensure smooth transitions.
+            7. Add depth and new insights.
+            8. Keep it engaging throughout.
+
+            Please provide the improved version of the problematic section.
+            """
+
+            try:
+                improvement_response = await self.openai_service.client.chat.completions.create(
+                    model=self.openai_service.model,
+                    messages=[
+                        {"role": "system", "content": "You are an expert script editor. Your task is to improve the script quality."},
+                        {"role": "user", "content": improvement_prompt}
+                    ],
+                    temperature=self.openai_service.temperature,
+                    max_tokens=min(MAX_IMPROVEMENT_TOKENS, len(script.split()) * 10), # Conservative token limit
+                    timeout=self.openai_service.timeout
+                )
+                
+                improved_script = improvement_response.choices[0].message.content.strip()
+                
+                # Test improved script quality
+                improved_quality = await self.analyze_content_quality(improved_script)
+                
+                logger.info(f"Attempt {attempt + 1}: Improved quality score from {current_quality_analysis['overall_quality']['score']:.2f} to {improved_quality['overall_quality']['score']:.2f}")
+                
+                if improved_quality['overall_quality']['score'] >= MIN_IMPROVEMENT_SCORE:
+                    return improved_script
+                else:
+                    logger.warning(f"Attempt {attempt + 1}: Improvement did not meet threshold. Original score: {current_quality_analysis['overall_quality']['score']:.2f}, Improved score: {improved_quality['overall_quality']['score']:.2f}")
+                    # If improvement doesn't meet threshold, try again with the new script
+                    script = improved_script
+            except Exception as e:
+                logger.error(f"Error during quality improvement attempt {attempt + 1}: {str(e)}")
+                return script # Return original on error
+        
+        logger.warning(f"Failed to meet quality threshold after {MAX_IMPROVEMENT_ATTEMPTS} attempts. Final quality: {current_quality_analysis['overall_quality']['score']:.2f}")
+        return script # Return original if no improvement after multiple attempts
+
+# Lazy initialization
 _openai_service_instance = None
 
 def get_openai_service():
@@ -1337,4 +1459,4 @@ class LazyOpenAIService:
     def __getattr__(self, name):
         return getattr(get_openai_service(), name)
 
-openai_service = LazyOpenAIService() 
+openai_service = LazyOpenAIService()
