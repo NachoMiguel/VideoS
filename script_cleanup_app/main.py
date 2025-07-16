@@ -73,8 +73,8 @@ async def main():
         output_path = Path("output") / f"cleaned_{original_name}_{timestamp}.txt"
         output_path.parent.mkdir(exist_ok=True)
         
-        # Save cleaned script
-        with open(output_path, 'w', encoding='utf-8') as f:
+        # Write the cleaned script with proper line breaks
+        with open(output_path, 'w', encoding='utf-8', newline='\n') as f:
             f.write(cleaned_script)
         
         print(f"\n✅ CLEANUP COMPLETE")

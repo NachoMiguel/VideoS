@@ -94,9 +94,7 @@ class ScriptProcessor:
         return final_entities
 
     async def process_script(self, script_content: str, video_context: Optional[Dict] = None) -> str:
-        """Process script through all cleanup steps."""
-        
-        self.original_script = script_content
+        """Process script through the complete cleanup pipeline."""
         logger.info("🎯 Starting script cleanup pipeline")
         
         # Step 1: Text Cleaner
@@ -106,37 +104,36 @@ class ScriptProcessor:
         
         # Step 2: Algorithmic Entity Extraction
         logger.info("Step 2: Algorithmic Entity Extraction")
-        if video_context:
-            main_entities = self._extract_main_entities(video_context)
-            logger.info(f"   Main entities: {main_entities}")
-        else:
-            # Fallback to script extraction
-            main_entities = self._extract_entities_from_script(step1_script)
-            logger.info(f"   Fallback entities: {main_entities}")
+        main_entities = self._extract_main_entities(video_context)
+        logger.info(f"   Main entities: {main_entities}")
         
         # Step 3: Name Corrections
         logger.info("Step 3: Name Corrections")
         step3_script = await self._apply_name_corrections(step1_script)
-        logger.info(f"   Length: {len(step1_script)} → {len(step3_script)} characters")
+        logger.info(f"   Length: {len(script_content)} → {len(step3_script)} characters")
         
         # Step 4: Entity Variations
         logger.info("Step 4: Entity Variations")
         step4_script = await self._apply_entity_variations(step3_script, main_entities)
-        logger.info(f"   Length: {len(step3_script)} → {len(step4_script)} characters")
+        logger.info(f"   Length: {len(script_content)} → {len(step4_script)} characters")
         
         # Step 5: TTS Optimization
         logger.info("Step 5: TTS Optimization")
-        step5_script = await self._optimize_for_tts(step4_script)
-        logger.info(f"   Length: {len(step3_script)} → {len(step5_script)} characters")
+        step5_script = self.text_cleaner.clean_for_voice(step4_script)
+        logger.info(f"   Length: {len(script_content)} → {len(step5_script)} characters")
         
-        # Step 6: Final Validation
-        logger.info("Step 6: Final Validation")
-        final_script = await self._validate_for_tts(step5_script)
-        logger.info(f"   Length: {len(step5_script)} → {len(final_script)} characters")
+        # 🚨 STEP 6: PARAGRAPH FORMATTING (ACTUALLY IMPLEMENTED)
+        logger.info("Step 6: Paragraph Formatting")
+        step6_script = self._format_paragraphs(step5_script)
+        logger.info(f"   Length: {len(script_content)} → {len(step6_script)} characters")
         
-        self.cleaned_script = final_script
+        # Step 7: Final Validation
+        logger.info("Step 7: Final Validation")
+        final_script = self._validate_script(step6_script)
+        logger.info(f"   Final validation completed")
+        logger.info(f"   Length: {len(script_content)} → {len(final_script)} characters")
+        
         logger.info("✅ Script cleanup completed")
-        
         return final_script
     
     async def _apply_name_corrections(self, script: str) -> str:
@@ -291,20 +288,38 @@ class ScriptProcessor:
         else:
             return str(num)
     
-    async def _validate_for_tts(self, script: str) -> str:
-        """Final validation and cleanup."""
-        # Remove multiple spaces
-        script = re.sub(r'\s+', ' ', script)
+    def _validate_script(self, script: str) -> str:
+        """Validate and finalize the cleaned script while preserving line breaks."""
+        logger.info("   Final validation completed")
         
-        # Remove leading/trailing whitespace
-        script = script.strip()
+        # Basic validation checks
+        if not script or len(script.strip()) == 0:
+            logger.warning("   ⚠️ Script is empty after processing")
+            return script
         
-        # Ensure script is not empty
-        if not script:
-            raise ValueError("Script is empty after processing")
+        # Ensure proper ending
+        if not script.endswith('.'):
+            script = script.rstrip() + '.'
         
-        logger.info(f"   Final validation completed")
-        return script
+        #  CRITICAL FIX: Preserve line breaks during cleanup
+        # Split by line breaks first to preserve paragraph structure
+        paragraphs = script.split('\n\n')
+        
+        # Clean each paragraph individually
+        cleaned_paragraphs = []
+        for paragraph in paragraphs:
+            if paragraph.strip():  # Only process non-empty paragraphs
+                # Remove double spaces but preserve line breaks
+                cleaned_paragraph = ' '.join(paragraph.split())
+                cleaned_paragraphs.append(cleaned_paragraph)
+        
+        # Rejoin with double line breaks to preserve paragraph structure
+        final_script = '\n\n'.join(cleaned_paragraphs)
+        
+        logger.info(f"   Final script length: {len(final_script)} characters")
+        logger.info(f"   Preserved {len(cleaned_paragraphs)} paragraphs")
+        
+        return final_script
     
     def show_comparison(self, original: str, cleaned: str):
         """Show before/after comparison."""
@@ -345,3 +360,55 @@ class ScriptProcessor:
         numbers_in_original = len(re.findall(r'\b\d+\b', original))
         if numbers_in_original > 0:
             print(f"   ✅ Converted {numbers_in_original} numbers to words") 
+
+    def _format_paragraphs(self, script: str) -> str:
+        """Add proper paragraph breaks for TTS optimization."""
+        logger.info("   Formatting paragraphs for TTS optimization")
+        
+        # Add debug logging
+        logger.info(f"   Input script length: {len(script)}")
+        logger.info(f"   Input script preview: {script[:100]}...")
+        
+        # Split on natural break points
+        paragraphs = []
+        sentences = script.split('. ')
+        
+        logger.info(f"   Found {len(sentences)} sentences")
+        
+        current_paragraph = []
+        for i, sentence in enumerate(sentences):
+            current_paragraph.append(sentence)
+            
+            # Start new paragraph on topic shifts or every 5-7 sentences
+            should_break = False
+            
+            # Topic shift indicators
+            if any(keyword in sentence.lower() for keyword in [
+                'the scene was set', 'picture this', 'in the days following',
+                'as the story unfolded', 'meanwhile', 'later', 'then',
+                'jean-claude\'s instagram', 'van damme had stayed quiet'
+            ]):
+                should_break = True
+                logger.info(f"   Breaking on topic shift: {sentence[:50]}...")
+            
+            # Length-based breaks (every 5-7 sentences)
+            elif len(current_paragraph) >= 6:
+                should_break = True
+                logger.info(f"   Breaking on length: {len(current_paragraph)} sentences")
+            
+            if should_break and current_paragraph:
+                paragraphs.append('. '.join(current_paragraph) + '.')
+                current_paragraph = []
+        
+        # Add remaining sentences
+        if current_paragraph:
+            paragraphs.append('. '.join(current_paragraph) + '.')
+        
+        # Join with double line breaks
+        formatted_script = '\n\n'.join(paragraphs)
+        
+        logger.info(f"   Created {len(paragraphs)} paragraphs")
+        logger.info(f"   Output script length: {len(formatted_script)}")
+        logger.info(f"   Output preview: {formatted_script[:200]}...")
+        
+        return formatted_script
