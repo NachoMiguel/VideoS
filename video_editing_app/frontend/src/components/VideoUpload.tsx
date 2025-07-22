@@ -12,14 +12,13 @@ interface VideoUploadProps {
 }
 
 export function VideoUpload({ onVideosUploaded }: VideoUploadProps) {
-  console.log('🎬 VideoUpload rendered with props:', { 
-    onVideosUploaded: !!onVideosUploaded, 
-    // Remove: onSessionCreated: !!onSessionCreated 
-  })
+  
   const [videos, setVideos] = useState<File[]>([])
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState(0)
   const [error, setError] = useState('')
+  // Add character input state
+  const [characters, setCharacters] = useState<string>('');
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     const videoFiles = acceptedFiles.filter(file => 
@@ -62,34 +61,33 @@ export function VideoUpload({ onVideosUploaded }: VideoUploadProps) {
     }
 
     setUploading(true)
+    setProgress(0)
     console.log('📤 Setting uploading state to true')
 
     try {
       const formData = new FormData()
       videos.forEach(video => {
         formData.append('files', video)
+        console.log('📁 Adding video to formData:', video.name, video.size)
       })
       
+      console.log('📡 Making request to backend...')
       const response = await fetch('http://localhost:8001/upload-videos', {
         method: 'POST',
         body: formData
       })
 
-      console.log('📥 Response received:', response.status)
+      console.log('📥 Response received:', response.status, response.statusText)
       
       if (!response.ok) {
         const errorText = await response.text()
         console.error('❌ Response not OK:', errorText)
-        throw new Error(`Upload failed: ${response.status}`)
+        throw new Error(`Upload failed: ${response.status} - ${errorText}`)
       }
 
       const data = await response.json()
       console.log('✅ Upload successful, data:', data)
 
-      // Remove these lines:
-      // console.log('📞 Calling onSessionCreated with:', sessionId)
-      // onSessionCreated(sessionId)
-      
       console.log('📞 Calling onVideosUploaded with:', videos.length, 'videos')
       onVideosUploaded(videos)
       
@@ -101,6 +99,7 @@ export function VideoUpload({ onVideosUploaded }: VideoUploadProps) {
       console.error('💥 Upload error:', err)
       setError(err instanceof Error ? err.message : 'Upload failed')
       setUploading(false)
+      setProgress(0)
     }
   }
 
@@ -122,6 +121,19 @@ export function VideoUpload({ onVideosUploaded }: VideoUploadProps) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        <div>
+          <label className="block text-sm font-medium text-gray-700">
+            Main Characters (comma-separated)
+          </label>
+          <input
+            type="text"
+            value={characters}
+            onChange={(e) => setCharacters(e.target.value)}
+            placeholder="Jean-Claude Van Damme, Steven Seagal"
+            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+          />
+        </div>
+        
         {/* Drop Zone */}
         <div
           {...getRootProps()}

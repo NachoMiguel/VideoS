@@ -10,12 +10,7 @@ import asyncio
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning, module="insightface")
 
-# Add yt root to path for ai_shared_lib imports
-yt_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-import sys
-sys.path.insert(0, yt_root)
-
-from ai_shared_lib.config import settings
+from config import settings
 
 # Define missing exception
 class FaceDetectionError(Exception):
@@ -36,6 +31,10 @@ class FaceDetector:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
         self.logger.info("Initializing InsightFace...")
+        
+        # CRITICAL FIX: Initialize known_faces attribute
+        self.known_faces = {}
+        self.face_cascade = None
 
         try:
             self.app = insightface.app.FaceAnalysis(
@@ -43,21 +42,27 @@ class FaceDetector:
                 providers=["CPUExecutionProvider"]  # or ["CUDAExecutionProvider"] if you have GPU
             )
             self.app.prepare(ctx_id=0, det_size=getattr(settings, 'INSIGHTFACE_DET_SIZE', (640, 640)))
-            self.logger.info("InsightFace initialized successfully.")
+            self.logger.info("✅ InsightFace initialized successfully.")
         except Exception as e:
-            self.logger.error(f"Failed to initialize InsightFace: {str(e)}")
-            raise RuntimeError(
-                "InsightFace must be available for this pipeline. "
-                "No fallback to OpenCV. Fix your environment and try again."
-            )
+            self.logger.error(f"❌ Failed to initialize InsightFace: {str(e)}")
+            raise FaceDetectionError(f"InsightFace initialization failed: {e}")
     
     def _detect_faces_insightface(self, frame):
         if self.app is None:
             raise RuntimeError("InsightFace not initialized")
         try:
             faces = self.app.get(frame)
-            # ... (rest of your face extraction logic) ...
-            return faces
+            # Convert InsightFace format to our expected format
+            result = []
+            for face in faces:
+                result.append({
+                    'bbox': face.bbox.astype(int).tolist(),
+                    'confidence': face.det_score,
+                    'embedding': face.embedding,
+                    'quality_score': face.det_score,
+                    'landmarks': face.kps.tolist() if hasattr(face, 'kps') else None
+                })
+            return result
         except Exception as e:
             self.logger.error(f"InsightFace detection error: {str(e)}")
             raise
@@ -111,7 +116,8 @@ class FaceDetector:
         try:
             logger.info(f"Training face recognition for {len(character_images)} characters")
             
-            trained_characters = {}
+            # CRITICAL FIX: Store trained embeddings in self.known_faces
+            self.known_faces = {}
             
             for character_name, image_paths in character_images.items():
                 try:
@@ -143,7 +149,8 @@ class FaceDetector:
                             continue
                     
                     if embeddings:
-                        trained_characters[character_name] = embeddings
+                        # CRITICAL FIX: Store in self.known_faces for later use
+                        self.known_faces[character_name] = embeddings
                         logger.info(f"Trained {len(embeddings)} embeddings for {character_name}")
                     else:
                         logger.warning(f"No valid embeddings found for {character_name}")
@@ -152,8 +159,8 @@ class FaceDetector:
                     logger.error(f"Error training character {character_name}: {str(e)}")
                     continue
             
-            logger.info(f"Face recognition training completed for {len(trained_characters)} characters")
-            return trained_characters
+            logger.info(f"Face recognition training completed for {len(self.known_faces)} characters")
+            return self.known_faces
             
         except Exception as e:
             logger.error(f"Face recognition training error: {str(e)}")
@@ -179,7 +186,7 @@ class FaceDetector:
     
     def identify_character(self, face_embedding: np.ndarray) -> Optional[Tuple[str, float]]:
         """Identify a character from face embedding."""
-        if not self.known_faces:
+        if not self.known_faces or face_embedding is None:
             return None
         
         best_match = None
@@ -187,12 +194,15 @@ class FaceDetector:
         
         for character_name, character_embeddings in self.known_faces.items():
             for embedding in character_embeddings:
-                similarity = self.compare_faces(face_embedding, embedding)
-                if similarity > best_similarity:
-                    best_similarity = similarity
-                    best_match = character_name
+                if embedding is not None:
+                    similarity = self.compare_faces(face_embedding, embedding)
+                    if similarity > best_similarity:
+                        best_similarity = similarity
+                        best_match = character_name
         
-        if best_similarity >= settings.FACE_SIMILARITY_THRESHOLD:
+        # Use default threshold if not set
+        threshold = getattr(settings, 'FACE_SIMILARITY_THRESHOLD', 0.6)
+        if best_similarity >= threshold:
             return best_match, best_similarity
         
         return None
@@ -305,19 +315,29 @@ class FaceDetector:
                 if ret:
                     timestamp = frame_number / fps
                     
-                    # Detect faces in this frame only
-                    faces = self._detect_faces_opencv_fallback(frame)
+                    # CRITICAL FIX: Use InsightFace instead of OpenCV fallback
+                    try:
+                        faces = self._detect_faces_insightface(frame)
+                    except Exception as e:
+                        logger.warning(f"InsightFace detection failed for frame {frame_number}, using OpenCV fallback: {e}")
+                        faces = self._detect_faces_opencv_fallback(frame)
                     
                     if faces:
                         for face in faces:
-                            # ADD THIS: Identify character for each detected face
-                            character_name = self.identify_character(face.get('embedding'))
+                            # CRITICAL FIX: Proper character identification
+                            character_result = None
+                            if face.get('embedding') is not None:
+                                character_result = self.identify_character(face['embedding'])
+                            
+                            character_name = None
+                            if character_result:
+                                character_name, confidence = character_result
                             
                             face_data = {
                                 "timestamp": timestamp,
                                 "bbox": face["bbox"],
                                 "confidence": face["confidence"],
-                                "character": character_name,  # ADD THIS
+                                "character": character_name,
                                 "embedding": face.get("embedding")
                             }
                             current_scene["faces"].append(face_data)

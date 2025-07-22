@@ -7,14 +7,8 @@ from urllib.parse import urlparse
 import aiofiles
 from pathlib import Path
 import logging
-import json
-import sys
 
-# Add yt root to path for ai_shared_lib imports
-yt_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-sys.path.insert(0, yt_root)
-
-from ai_shared_lib.config import settings
+from config import settings
 
 logger = logging.getLogger(__name__)
 

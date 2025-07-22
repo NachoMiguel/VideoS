@@ -1,0 +1,10 @@
+# Core dependencies
+python-dotenv
+
+# Standard libraries (for reference, not needed in requirements.txt):
+# os, sys, re, logging, typing, pathlib, datetime, traceback, collections, unicodedata, asyncio
+
+# No external dependencies detected in main code, but add any you use for optional features below:
+# aiohttp
+# openai
+# ... 

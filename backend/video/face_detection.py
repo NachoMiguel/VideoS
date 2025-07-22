@@ -73,9 +73,18 @@ class FaceDetector:
     """Enhanced face detection and recognition with InsightFace."""
     
     def __init__(self):
-        self.cache_dir = Path(settings.cache_dir) / "faces"
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
-        
+        import insightface  # (Best to import at the top of the file)
+        self.logger = logging.getLogger(__name__)
+        self.logger.info("Initializing InsightFace...")
+
+        # Use correct settings attribute names
+        self.app = insightface.app.FaceAnalysis(
+            name=getattr(settings, 'INSIGHTFACE_MODEL_NAME', 'buffalo_l'),
+            providers=["CPUExecutionProvider"]  # or ["CUDAExecutionProvider"] if you have GPU
+        )
+        self.app.prepare(ctx_id=0, det_size=getattr(settings, 'INSIGHTFACE_DET_SIZE', (640, 640)))
+        self.logger.info("InsightFace initialized successfully.")
+
         # Parallel processing settings
         self.parallel_enabled = settings.parallel_face_detection
         self.max_workers = settings.max_workers
@@ -386,7 +395,10 @@ class FaceDetector:
         character_images: Dict[str, List[str]],
         progress_callback: Optional[callable] = None
     ) -> Dict[str, List[np.ndarray]]:
-        """Train face embeddings for known characters with persistence layer."""
+        """
+        Train face embeddings for known characters using images (e.g., from Google Custom Search).
+        Uses InsightFace to extract embeddings and saves them for later recognition.
+        """
         trained_faces = {}
         total_characters = len(character_images)
         
@@ -398,36 +410,32 @@ class FaceDetector:
                     trained_faces[character_name] = cached_embeddings
                     self.known_faces[character_name] = cached_embeddings
                     logger.info(f"Loaded cached training for {character_name}: {len(cached_embeddings)} embeddings")
-                    
                     if progress_callback:
                         progress = ((i + 1) / total_characters) * 100
                         await progress_callback(f"Loaded cached {character_name}", progress)
                     continue
-                
-                # Train new character
+
                 embeddings = []
                 valid_images = 0
-                
-                for image_path in image_paths:
+
+                for img_path in image_paths:
                     if valid_images >= settings.max_character_images:
                         break
-                        
-                    image = cv2.imread(image_path)
-                    if image is None:
+                    img = cv2.imread(img_path)
+                    if img is None:
+                        logger.warning(f"Could not load image: {img_path}")
                         continue
-                    
-                    faces = self._detect_faces_insightface(image)
+                    faces = self._detect_faces_insightface(img)
                     if faces:
                         # Use the highest confidence face
                         best_face = max(faces, key=lambda x: x['confidence'])
                         if best_face['quality_score'] >= settings.face_quality_threshold:
                             embeddings.append(best_face['embedding'])
                             valid_images += 1
-                
+
                 if len(embeddings) >= settings.min_character_images:
                     trained_faces[character_name] = embeddings
                     self.known_faces[character_name] = embeddings
-                    
                     # Save to persistence layer
                     metadata = {
                         'image_count': len(image_paths),
@@ -435,18 +443,17 @@ class FaceDetector:
                         'training_date': time.time()
                     }
                     character_persistence.save_character_training(character_name, embeddings, metadata)
-                    
                     logger.info(f"Trained and cached {character_name} with {len(embeddings)} face embeddings")
                 else:
                     logger.warning(f"Insufficient quality images for {character_name}: {len(embeddings)}/{settings.min_character_images}")
-                
+
                 if progress_callback:
                     progress = ((i + 1) / total_characters) * 100
                     await progress_callback(f"Trained {character_name}", progress)
-                    
+
             except Exception as e:
                 logger.error(f"Error training {character_name}: {str(e)}")
-        
+
         return trained_faces
 
     def identify_character(self, face_embedding: np.ndarray) -> Optional[Tuple[str, float]]:

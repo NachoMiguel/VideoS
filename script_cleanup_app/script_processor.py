@@ -9,17 +9,45 @@ from typing import Dict, List, Optional
 import sys
 import os
 
-# Add backend to Python path
+# Configure logging FIRST
+logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+logger = logging.getLogger(__name__)
+
+# Fix the path resolution
 backend_path = os.path.join(os.path.dirname(__file__), '..', 'backend')
 sys.path.insert(0, backend_path)
 
-# Now import the services
-from services.text_cleaner import VoiceOptimizedTextCleaner
-from services.entity_variation_manager import entity_variation_manager
+# Add services to path
+services_path = os.path.join(backend_path, 'services')
+sys.path.insert(0, services_path)
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
-logger = logging.getLogger(__name__)
+# Add error handling around imports
+try:
+    from text_cleaner import VoiceOptimizedTextCleaner
+    from entity_variation_manager import entity_variation_manager
+    logger.info("✅ Successfully imported backend services")
+except ImportError as e:
+    logger.error(f"❌ Failed to import backend services: {e}")
+    logger.error("Falling back to local implementations...")
+    
+    # Fallback to local text_cleaner
+    from text_cleaner import VoiceOptimizedTextCleaner
+    
+    # Create minimal entity variation manager
+    class MinimalEntityVariationManager:
+        def __init__(self):
+            self.mention_count = {}
+        
+        def reset_mentions(self):
+            self.mention_count.clear()
+        
+        def register_entities(self, entities):
+            pass
+        
+        def get_variation(self, entity):
+            return entity
+    
+    entity_variation_manager = MinimalEntityVariationManager()
 
 class ScriptProcessor:
     """Core script processing and cleanup."""

@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+python-multipart
+opencv-python
+# FFmpeg is the primary video processing method for reliable concatenation
+ffmpeg-python
+# MoviePy kept for individual clip validation and operations
+moviepy
+numpy==1.24.3
+aiohttp
+aiofiles
+python-dotenv
+onnxruntime-gpu==1.16.3 

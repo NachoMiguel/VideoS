@@ -61,43 +61,67 @@ export default function Home() {
   console.log('📊 Current status:', status, 'Videos:', videos.length, 'Audio:', !!audioFile)
 
   const startEditing = async () => {
-    if (videos.length === 0 || !audioFile) return
-
+    console.log('🚀 Starting editing process')
     setStatus('processing')
     setProgress(0)
     setError('')
 
     try {
-      // Remove session_id from URL
+      // Get characters from input
+      const characterInput = (document.querySelector('input[placeholder*="Jean-Claude"]') as HTMLInputElement)?.value || 'Jean-Claude Van Damme, Steven Seagal';
+      
+      console.log('📡 Making request to backend...')
       const response = await fetch('http://localhost:8001/start-editing', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({
+          characters: characterInput
+        })
       })
 
-      if (!response.ok) throw new Error('Failed to start editing')
+      console.log('📡 Response received:', response.status, response.statusText)
 
-      // Poll for status without session_id
-      const pollStatus = async () => {
-        const statusResponse = await fetch('http://localhost:8001/status')
-        const statusData = await statusResponse.json()
-
-        setProgress(statusData.progress)
-
-        if (statusData.status === 'completed') {
-          setStatus('completed')
-        } else if (statusData.status === 'error') {
-          setStatus('error')
-          setError(statusData.error)
-        } else {
-          setTimeout(pollStatus, 1000)
-        }
+      if (!response.ok) {
+        const errorData = await response.json()
+        console.log('❌ Backend error:', errorData)
+        throw new Error(errorData.detail || 'Failed to start editing')
       }
 
-      pollStatus()
+      const data = await response.json()
+      console.log('✅ Editing started:', data)
 
-    } catch (err) {
+      // REAL-TIME PROGRESS TRACKING
+      const progressInterval = setInterval(async () => {
+        try {
+          const statusResponse = await fetch('http://localhost:8001/status')
+          if (statusResponse.ok) {
+            const statusData = await statusResponse.json()
+            console.log('📊 Real status:', statusData)
+            
+            setProgress(statusData.progress || 0)
+            
+            if (statusData.status === 'completed') {
+              clearInterval(progressInterval)
+              setStatus('completed')
+              console.log('✅ Processing completed!')
+            } else if (statusData.status === 'error') {
+              clearInterval(progressInterval)
+              setStatus('error')
+              setError('Processing failed')
+              console.log('❌ Processing failed!')
+            }
+          }
+        } catch (error) {
+          console.error('❌ Status check error:', error)
+        }
+      }, 1000) // Check every second
+
+    } catch (error) {
+      console.error('❌ Start editing error:', error)
       setStatus('error')
-      setError(err instanceof Error ? err.message : 'Unknown error')
+      setError(error instanceof Error ? error.message : 'Failed to start editing')
     }
   }
 
