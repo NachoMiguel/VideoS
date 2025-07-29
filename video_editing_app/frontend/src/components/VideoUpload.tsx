@@ -1,24 +1,40 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useDropzone } from 'react-dropzone'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
-import { Upload, Video, X, CheckCircle } from 'lucide-react'
+import { Upload, Video, X, CheckCircle, FileText, Clock } from 'lucide-react'
 
 interface VideoUploadProps {
   onVideosUploaded: (videos: File[]) => void
+  onScriptDataReady: (scriptData: { characters: string, scriptContent: string, audioDuration: number }) => void
 }
 
-export function VideoUpload({ onVideosUploaded }: VideoUploadProps) {
+export function VideoUpload({ onVideosUploaded, onScriptDataReady }: VideoUploadProps) {
   
   const [videos, setVideos] = useState<File[]>([])
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState(0)
   const [error, setError] = useState('')
-  // Add character input state
-  const [characters, setCharacters] = useState<string>('');
+  
+  // Script-based editing inputs
+  const [characters, setCharacters] = useState<string>('Jean-Claude Van Damme, Steven Segal')
+  const [scriptContent, setScriptContent] = useState<string>('')
+  const [audioDuration, setAudioDuration] = useState<number>(22.0)
+
+  // CRITICAL FIX: Trigger script data callback immediately when videos are selected
+  useEffect(() => {
+    if (videos.length > 0) {
+      console.log('📝 Triggering script data callback immediately with videos selected')
+      onScriptDataReady({
+        characters: characters,
+        scriptContent: scriptContent,
+        audioDuration: audioDuration
+      })
+    }
+  }, [videos, characters, scriptContent, audioDuration]) // REMOVED onScriptDataReady from dependencies
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     const videoFiles = acceptedFiles.filter(file => 
@@ -91,6 +107,8 @@ export function VideoUpload({ onVideosUploaded }: VideoUploadProps) {
       console.log('📞 Calling onVideosUploaded with:', videos.length, 'videos')
       onVideosUploaded(videos)
       
+      // REMOVED: No longer need to call onScriptDataReady here since it's handled by useEffect
+      
       setProgress(100)
       setUploading(false)
       console.log('✅ Upload process completed')
@@ -106,6 +124,7 @@ export function VideoUpload({ onVideosUploaded }: VideoUploadProps) {
   const handleButtonClick = () => {
     console.log('🔘 Upload button clicked!')
     console.log('📁 Videos selected:', videos.length)
+    console.log('📝 Script data:', { characters, scriptContent: scriptContent.length, audioDuration })
     uploadVideos()
   }
 
@@ -114,24 +133,65 @@ export function VideoUpload({ onVideosUploaded }: VideoUploadProps) {
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Video className="h-5 w-5" />
-          Upload Videos
+          Script-Based Video Editor
         </CardTitle>
         <CardDescription>
-          Upload 2-3 video files (MP4, AVI, MOV, MKV)
+          Upload videos and provide script content for AI-driven editing
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        
+        {/* Character Input */}
         <div>
-          <label className="block text-sm font-medium text-gray-700">
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            <FileText className="h-4 w-4 inline mr-1" />
             Main Characters (comma-separated)
           </label>
           <input
             type="text"
             value={characters}
             onChange={(e) => setCharacters(e.target.value)}
-            placeholder="Jean-Claude Van Damme, Steven Seagal"
-            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+            placeholder="Jean-Claude Van Damme, Steven Segal"
+            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2"
           />
+        </div>
+
+        {/* Script Content Input */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            <FileText className="h-4 w-4 inline mr-1" />
+            Script Content (Optional)
+          </label>
+          <textarea
+            value={scriptContent}
+            onChange={(e) => setScriptContent(e.target.value)}
+            placeholder="Enter your script content here... The AI will analyze this to determine character screen time and scene selection."
+            rows={4}
+            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2"
+          />
+          <p className="text-xs text-gray-500 mt-1">
+            Leave empty to use equal character distribution
+          </p>
+        </div>
+
+        {/* Audio Duration Input */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            <Clock className="h-4 w-4 inline mr-1" />
+            Target Video Duration (minutes)
+          </label>
+          <input
+            type="number"
+            value={audioDuration}
+            onChange={(e) => setAudioDuration(parseFloat(e.target.value) || 22.0)}
+            min="1"
+            max="120"
+            step="0.5"
+            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm p-2"
+          />
+          <p className="text-xs text-gray-500 mt-1">
+            Target duration for the final video (default: 22 minutes)
+          </p>
         </div>
         
         {/* Drop Zone */}
@@ -199,7 +259,7 @@ export function VideoUpload({ onVideosUploaded }: VideoUploadProps) {
         {videos.length > 0 && !uploading && (
           <Button onClick={handleButtonClick} className="w-full">
             <Upload className="h-4 w-4 mr-2" />
-            Upload {videos.length} Video{videos.length > 1 ? 's' : ''}
+            Upload {videos.length} Video{videos.length > 1 ? 's' : ''} & Start Editing
           </Button>
         )}
       </CardContent>

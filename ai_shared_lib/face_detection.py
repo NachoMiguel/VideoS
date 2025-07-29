@@ -1,9 +1,20 @@
+# CRITICAL: Fix CUDA path BEFORE any other imports
+import sys
+import os
+# Add video_editing_app to path for cuda_path_fix
+video_editing_app_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'video_editing_app'))
+if os.path.exists(video_editing_app_path):
+    sys.path.insert(0, video_editing_app_path)
+    try:
+        import cuda_path_fix
+    except ImportError:
+        pass
+
 import cv2
 import numpy as np
 import logging
 import time
 from typing import List, Dict, Optional, Tuple, Any
-import os
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 import asyncio
@@ -11,6 +22,42 @@ import warnings
 warnings.filterwarnings("ignore", category=FutureWarning, module="insightface")
 
 from config import settings
+
+# Try to import CUDA utilities from different possible locations
+CUDA_UTILS_AVAILABLE = False
+cuda_optimizer = None
+get_cuda_status = None
+
+# Try local cuda_compatibility first (for video_editing_app usage)
+try:
+    import sys
+    import os
+    # Add video_editing_app to path if we're in that context
+    video_editing_app_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'video_editing_app'))
+    if os.path.exists(video_editing_app_path):
+        sys.path.insert(0, video_editing_app_path)
+        from cuda_compatibility import create_optimized_insightface_app, check_compatibility
+        CUDA_UTILS_AVAILABLE = True
+        
+        # Create wrapper functions to match the expected interface
+        def get_cuda_status():
+            return check_compatibility()
+        
+        def create_optimized_insightface_app_wrapper(model_name="buffalo_l", device_id=0):
+            return create_optimized_insightface_app()
+            
+        cuda_optimizer = type('obj', (object,), {
+            'create_optimized_insightface_app': create_optimized_insightface_app_wrapper,
+            'get_optimized_config': lambda device_id=0: {'parallel_processing': True, 'max_workers': 4, 'batch_size': 8}
+        })
+        
+except ImportError:
+    # Try backend.core.cuda_utils as fallback (for backend usage)
+    try:
+        from backend.core.cuda_utils import cuda_optimizer, get_cuda_status
+        CUDA_UTILS_AVAILABLE = True
+    except ImportError:
+        CUDA_UTILS_AVAILABLE = False
 
 # Define missing exception
 class FaceDetectionError(Exception):
@@ -30,19 +77,58 @@ class FaceDetector:
     
     def __init__(self):
         self.logger = logging.getLogger(__name__)
-        self.logger.info("Initializing InsightFace...")
+        self.logger.info("Initializing InsightFace with CUDA optimization...")
         
         # CRITICAL FIX: Initialize known_faces attribute
         self.known_faces = {}
         self.face_cascade = None
 
+        # Get CUDA status if available
+        if CUDA_UTILS_AVAILABLE:
+            try:
+                cuda_status = get_cuda_status()
+                self.logger.info(f"CUDA Status: {cuda_status['cuda_available']}")
+                if cuda_status['cuda_available']:
+                    self.logger.info(f"Available providers: {cuda_status['available_providers']}")
+            except Exception as e:
+                self.logger.warning(f"Could not get CUDA status: {e}")
+
+        # Use CUDA-optimized initialization if available
+        if CUDA_UTILS_AVAILABLE:
+            try:
+                # Add NVIDIA paths to environment for this process
+                import site
+                site_packages = site.getsitepackages()[0]
+                nvidia_cudnn_path = os.path.join(site_packages, "nvidia", "cudnn", "bin")
+                nvidia_cublas_path = os.path.join(site_packages, "nvidia", "cublas", "bin")
+                
+                if os.path.exists(nvidia_cudnn_path):
+                    if nvidia_cudnn_path not in os.environ.get('PATH', ''):
+                        os.environ['PATH'] = nvidia_cudnn_path + os.pathsep + os.environ.get('PATH', '')
+                        self.logger.info(f"Added cuDNN path to PATH: {nvidia_cudnn_path}")
+                
+                if os.path.exists(nvidia_cublas_path):
+                    if nvidia_cublas_path not in os.environ.get('PATH', ''):
+                        os.environ['PATH'] = nvidia_cublas_path + os.pathsep + os.environ.get('PATH', '')
+                        self.logger.info(f"Added cuBLAS path to PATH: {nvidia_cublas_path}")
+                
+                self.app = cuda_optimizer.create_optimized_insightface_app(
+                    model_name=getattr(settings, 'INSIGHTFACE_MODEL_NAME', 'buffalo_l'),
+                    device_id=0
+                )
+                self.logger.info("✅ InsightFace initialized successfully with CUDA optimization.")
+                return
+            except Exception as e:
+                self.logger.warning(f"CUDA optimization failed, falling back to default: {e}")
+
+        # Fallback to default initialization
         try:
             self.app = insightface.app.FaceAnalysis(
                 name=getattr(settings, 'INSIGHTFACE_MODEL_NAME', 'buffalo_l'),
-                providers=["CPUExecutionProvider"]  # or ["CUDAExecutionProvider"] if you have GPU
+                providers=["CUDAExecutionProvider", "CPUExecutionProvider"]  # Prioritize CUDA
             )
             self.app.prepare(ctx_id=0, det_size=getattr(settings, 'INSIGHTFACE_DET_SIZE', (640, 640)))
-            self.logger.info("✅ InsightFace initialized successfully.")
+            self.logger.info("✅ InsightFace initialized successfully with fallback configuration.")
         except Exception as e:
             self.logger.error(f"❌ Failed to initialize InsightFace: {str(e)}")
             raise FaceDetectionError(f"InsightFace initialization failed: {e}")

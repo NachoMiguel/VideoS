@@ -126,9 +126,17 @@ class ImageSearchService:
             return []
 
     async def _search_local_images(self, character_name: str) -> List[str]:
-        """Search local image database for known characters."""
+        """Search local cached images for known characters."""
         try:
-            # Local database for known characters
+            logger.info(f"Searching cached images for character: {character_name}")
+            
+            # First, try to find cached images in the character_images directory
+            cached_images = await self._get_cached_character_images(character_name)
+            if cached_images:
+                logger.info(f"Found {len(cached_images)} cached images for {character_name}")
+                return cached_images
+            
+            # Fallback to hardcoded local database for known characters
             local_database = {
                 "jean claude van damme": [
                     "https://m.media-amazon.com/images/M/MV5BMjI4NDI1MjY5OF5BMl5BanBnXkFtZTcwNTgzNzY3MQ@@._V1_.jpg",
@@ -157,6 +165,46 @@ class ImageSearchService:
             
         except Exception as e:
             logger.error(f"Error searching local images for {character_name}: {str(e)}")
+            return []
+
+    async def _get_cached_character_images(self, character_name: str) -> List[str]:
+        """Get cached character images from the character_images directory."""
+        try:
+            if not self.image_cache_dir.exists():
+                logger.warning(f"Character images cache directory does not exist: {self.image_cache_dir}")
+                return []
+            
+            # Try different variations of the character name
+            possible_names = [
+                character_name,
+                character_name.lower(),
+                character_name.title(),
+                character_name.replace(" ", ""),
+                character_name.replace(" ", "_"),
+                character_name.replace(" ", ".")
+            ]
+            
+            cached_images = []
+            
+            for name_variant in possible_names:
+                character_dir = self.image_cache_dir / self._sanitize_filename(name_variant)
+                if character_dir.exists() and character_dir.is_dir():
+                    logger.info(f"Found character directory: {character_dir}")
+                    
+                    # Get all image files in the directory
+                    image_extensions = ['.jpg', '.jpeg', '.png', '.webp', '.bmp']
+                    for file_path in character_dir.iterdir():
+                        if file_path.is_file() and file_path.suffix.lower() in image_extensions:
+                            cached_images.append(str(file_path))
+                    
+                    if cached_images:
+                        logger.info(f"Found {len(cached_images)} cached images for {character_name} in {character_dir}")
+                        break
+            
+            return cached_images
+            
+        except Exception as e:
+            logger.error(f"Error getting cached images for {character_name}: {str(e)}")
             return []
 
     def _is_valid_image_url(self, url: str) -> bool:

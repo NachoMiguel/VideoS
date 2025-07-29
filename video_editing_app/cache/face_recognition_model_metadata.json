@@ -1,0 +1,12 @@
+{
+  "model_trained": true,
+  "training_metrics": {
+    "intra_character_similarity": 0.43761128187179565,
+    "inter_character_similarity": -0.35411500930786133,
+    "discrimination_ratio": -1.2357886074499322,
+    "n_characters": 2,
+    "n_embeddings": 8
+  },
+  "timestamp": 1753803565.3135939,
+  "model_version": "1.0"
+}

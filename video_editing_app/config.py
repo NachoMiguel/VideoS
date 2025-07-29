@@ -39,7 +39,7 @@ class Settings:
     
     # Processing Settings
     MIN_CHARACTER_IMAGES: int = 3
-    MAX_CHARACTER_IMAGES: int = 10
+    MAX_CHARACTER_IMAGES: int = 8  # Increased from 5 to 8 for better training
     MIN_SCENE_DURATION: float = 2.0
     MAX_SCENE_DURATION: float = 30.0
     FACE_DETECTION_BATCH_SIZE: int = 32

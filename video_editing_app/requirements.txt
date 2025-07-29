@@ -10,4 +10,17 @@ numpy==1.24.3
 aiohttp
 aiofiles
 python-dotenv
-onnxruntime-gpu==1.16.3 
+# System monitoring for resource management
+psutil>=5.9.0
+# OpenAI for character extraction and analysis
+openai>=1.0.0
+# CUDA-optimized ONNX Runtime for InsightFace compatibility
+onnxruntime-gpu==1.22.0
+# InsightFace for face detection and recognition
+insightface==0.7.3
+# NVIDIA CUDA libraries for GPU acceleration
+nvidia-cudnn-cu12==9.11.0.98
+nvidia-cublas-cu12==12.9.1.4
+# Machine learning for actual model training
+scikit-learn==1.3.0
+joblib==1.3.2 

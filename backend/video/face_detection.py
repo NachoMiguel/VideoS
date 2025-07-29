@@ -19,6 +19,7 @@ try:
     from core.config import settings
     from core.exceptions import VideoProcessingError, FaceDetectionError
     from core.parallel import parallel_processor, parallel_task
+    from core.cuda_utils import cuda_optimizer, get_cuda_status
 except ImportError:
         # Create minimal fallback classes if imports fail
         class VideoProcessingError(Exception):
@@ -75,20 +76,47 @@ class FaceDetector:
     def __init__(self):
         import insightface  # (Best to import at the top of the file)
         self.logger = logging.getLogger(__name__)
-        self.logger.info("Initializing InsightFace...")
+        self.logger.info("Initializing InsightFace with CUDA optimization...")
 
-        # Use correct settings attribute names
-        self.app = insightface.app.FaceAnalysis(
-            name=getattr(settings, 'INSIGHTFACE_MODEL_NAME', 'buffalo_l'),
-            providers=["CPUExecutionProvider"]  # or ["CUDAExecutionProvider"] if you have GPU
-        )
-        self.app.prepare(ctx_id=0, det_size=getattr(settings, 'INSIGHTFACE_DET_SIZE', (640, 640)))
-        self.logger.info("InsightFace initialized successfully.")
+        # Get CUDA status and log it
+        try:
+            cuda_status = get_cuda_status()
+            self.logger.info(f"CUDA Status: {cuda_status['cuda_available']}")
+            if cuda_status['cuda_available']:
+                self.logger.info(f"Available providers: {cuda_status['available_providers']}")
+                self.logger.info(f"GPU info: {cuda_status['gpu_info']}")
+        except Exception as e:
+            self.logger.warning(f"Could not get CUDA status: {e}")
 
-        # Parallel processing settings
-        self.parallel_enabled = settings.parallel_face_detection
-        self.max_workers = settings.max_workers
-        self.batch_size = settings.face_detection_batch_size
+        # Use CUDA-optimized InsightFace initialization
+        try:
+            self.app = cuda_optimizer.create_optimized_insightface_app(
+                model_name=getattr(settings, 'insightface_model_name', 'buffalo_l'),
+                device_id=0
+            )
+            self.logger.info("✅ InsightFace initialized successfully with CUDA optimization.")
+        except Exception as e:
+            self.logger.warning(f"CUDA optimization failed, falling back to default: {e}")
+            # Fallback to default initialization
+            self.app = insightface.app.FaceAnalysis(
+                name=getattr(settings, 'insightface_model_name', 'buffalo_l'),
+                providers=settings.insightface_providers
+            )
+            self.app.prepare(ctx_id=0, det_size=settings.insightface_det_size)
+            self.logger.info("InsightFace initialized with fallback configuration.")
+
+        # Get optimized configuration
+        try:
+            optimized_config = cuda_optimizer.get_optimized_config(device_id=0)
+            self.parallel_enabled = optimized_config.get('parallel_processing', settings.parallel_face_detection)
+            self.max_workers = optimized_config.get('max_workers', settings.max_workers)
+            self.batch_size = optimized_config.get('batch_size', settings.face_detection_batch_size)
+            self.logger.info(f"Using optimized config - Batch size: {self.batch_size}, Workers: {self.max_workers}")
+        except Exception as e:
+            self.logger.warning(f"Could not get optimized config, using defaults: {e}")
+            self.parallel_enabled = settings.parallel_face_detection
+            self.max_workers = settings.max_workers
+            self.batch_size = settings.face_detection_batch_size
         
         # Face detection settings
         self.min_confidence = settings.insightface_det_thresh
